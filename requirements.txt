@@ -1,8 +1,27 @@
-loguru
-mkdocs
-pip
-python-dotenv
-ruff
-tqdm
-typer
+# Entorno del proyecto: Python 3.14 (ver README > Instalación).
+# Versiones fijas (==) para que cualquier clon limpio instale exactamente lo mismo.
+
+# Datos, modelos y seguimiento de experimentos
+mlflow==3.17.1
+numpy==2.5.3
+pandas==3.0.6
+pyarrow==25.0.1  # mlflow 3.17 requiere pyarrow<26
+scikit-learn==1.9.1
+skops==0.16.0  # formato seguro en que MLflow guarda los modelos de scikit-learn
+matplotlib==3.11.2
+
+# Ingesta y línea de comandos
+requests==2.34.2
+typer==0.27.3
+loguru==0.7.3
+tqdm==4.70.1
+python-dotenv==1.2.4
+
+# Notebooks, pruebas, formato y documentación
+ipykernel==7.4.0
+pytest==9.1.1
+ruff==0.17.0
+mkdocs==1.6.1
+
+# El paquete del proyecto en modo editable: habilita `python -m tc5061_proyecto_equipo18...`
 -e .
