@@ -57,10 +57,35 @@ create_environment:
 #################################################################################
 
 
-## Make dataset
+## Download, normalize and version the MiBici data (ingesta)
 .PHONY: data
-data: requirements
-	$(PYTHON_INTERPRETER) tc5061_proyecto_equipo18/dataset.py
+data:
+	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.dataset ingest
+
+## Verify local data against references/manifiesto_datos.json
+.PHONY: verify
+verify:
+	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.dataset verify
+
+## Build the P1, P2 and P3 datasets
+.PHONY: features
+features:
+	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.features
+
+## Run the 6 baseline/candidate runs of the experiment in MLflow
+.PHONY: train
+train:
+	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.train --todos
+
+## Run the tests
+.PHONY: test
+test:
+	$(PYTHON_INTERPRETER) -m pytest
+
+## Open the MLflow UI on http://localhost:5000
+.PHONY: mlflow-ui
+mlflow-ui:
+	mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 
 #################################################################################
