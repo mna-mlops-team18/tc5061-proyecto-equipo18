@@ -221,6 +221,27 @@ def tipos_canonicos(df: pd.DataFrame, tipos: dict[str, str]) -> pd.DataFrame:
     return df.astype({columna: tipo for columna, tipo in tipos.items() if columna in df.columns})
 
 
+def texto_a_float(textos: pd.Series) -> pd.Series:
+    """Convierte texto a ``float64`` con el mismo resultado en cualquier computadora.
+
+    ``pd.to_numeric`` usa un lector rapido que, con 17 cifras significativas (como las
+    coordenadas de la nomenclatura), no siempre da el double mas cercano, y ese ultimo bit puede
+    cambiar entre computadoras: con el mismo CSV y las mismas versiones, macOS y Windows dieron
+    hashes distintos de la nomenclatura. ``float()`` de Python siempre redondea al double mas
+    cercano (IEEE 754), asi que el valor es identico en todas. Lo que no es numero queda como NaN.
+    """
+
+    def convertir(texto: str) -> float:
+        try:
+            return float(texto)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    # La lista evita depender de como guarda pandas los textos (pyarrow o Python).
+    valores = [convertir(texto) for texto in textos.str.strip()]
+    return pd.Series(valores, index=textos.index, dtype="float64")
+
+
 def hash_archivo(ruta: Path) -> str:
     """SHA-256 del archivo tal como esta en disco (huella del CSV publicado)."""
     huella = hashlib.sha256()
@@ -365,8 +386,9 @@ def leer_estaciones_crudas(ruta: Path) -> tuple[pd.DataFrame, str]:
         dtype=str,
         na_values=VALORES_NULOS,
     ).rename(columns=mapa)
-    for columna in ("estacion_id", "latitud", "longitud"):
-        df[columna] = pd.to_numeric(df[columna].str.strip(), errors="coerce")
+    df["estacion_id"] = pd.to_numeric(df["estacion_id"].str.strip(), errors="coerce")
+    for columna in ("latitud", "longitud"):  # hasta 17 cifras: ver texto_a_float
+        df[columna] = texto_a_float(df[columna])
     if "capacidad" in df.columns:
         df["capacidad"] = pd.to_numeric(df["capacidad"].str.strip(), errors="coerce").fillna(0)
     else:
@@ -521,8 +543,15 @@ class Manifiesto:
             difs.append(
                 f"rango {self.mes_inicio}..{self.mes_fin} vs {otro.mes_inicio}..{otro.mes_fin}"
             )
-        if self.estaciones.sha256_contenido != otro.estaciones.sha256_contenido:
-            difs.append("nomenclatura de estaciones con contenido distinto")
+        if self.estaciones.sha256_crudo != otro.estaciones.sha256_crudo:
+            difs.append(
+                "nomenclatura de estaciones: el CSV del portal cambio (SHA-256 crudo distinto)"
+            )
+        elif self.estaciones.sha256_contenido != otro.estaciones.sha256_contenido:
+            difs.append(
+                "nomenclatura de estaciones: mismo CSV, pero el contenido limpio es distinto "
+                "(revisar como se procesa en cada computadora)"
+            )
         propios = {registro.mes: registro for registro in self.meses}
         ajenos = {registro.mes: registro for registro in otro.meses}
         for mes in sorted(set(propios) | set(ajenos)):

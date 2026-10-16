@@ -10,12 +10,18 @@ from tc5061_proyecto_equipo18.dataset import (
     detectar_codificacion,
     elegir_formato_fecha,
     hash_contenido,
+    leer_estaciones_crudas,
     leer_viajes_crudos,
     mapear_columnas,
     meses_en_rango,
     normalizar_nombre,
+    texto_a_float,
     tipos_canonicos,
 )
+
+# Coordenadas con 17 cifras significativas, como las de la nomenclatura real: con ellas
+# pd.to_numeric no siempre da el double mas cercano y el resultado cambia segun el procesador.
+COORDENADAS_17_CIFRAS = ["20.194892411578156", "-103.93877840801609", "-103.14841858398947"]
 
 ENCABEZADO_REAL = [
     "Viaje_Id", "Usuario_Id", "Genero", "A\u00f1o_de_nacimiento",
@@ -102,6 +108,30 @@ def test_leer_viajes_crudos_normaliza_y_descarta_datos_personales(tmp_path):
     assert list(lectura.datos["duracion_seg"]) == [630, 300]
     assert not set(COLUMNAS_PERSONALES) & set(lectura.datos.columns)
     assert {c: str(t) for c, t in lectura.datos.dtypes.items()} == TIPOS_VIAJES
+
+
+def test_texto_a_float_redondea_igual_en_cualquier_computadora():
+    textos = pd.Series([*COORDENADAS_17_CIFRAS, " 20.5 ", None, "NULL"], dtype="str")
+    valores = texto_a_float(textos)
+    assert valores.iloc[:4].tolist() == [float(t) for t in [*COORDENADAS_17_CIFRAS, "20.5"]]
+    assert valores.iloc[4:].isna().all()
+
+
+def test_leer_estaciones_crudas(tmp_path):
+    """Coordenadas exactas (mismo hash en Windows y en macOS), codigo y estaciones retiradas."""
+    texto = (
+        "id,name,latitude,longitude,dpcapacity\n"
+        "2,(ZPN-002) Av. Patria,20.194892411578156,-103.93877840801609,0\n"
+        "1,(GDL-001) C. Epigmenio,20.67,-103.35,15\n"
+    )
+    ruta = _escribir(tmp_path, "nomenclatura.csv", texto, "utf-8")
+    estaciones, codificacion = leer_estaciones_crudas(ruta)
+    assert codificacion == "utf-8-sig"
+    assert estaciones["estacion_id"].tolist() == [1, 2]
+    assert estaciones["latitud"].tolist() == [20.67, float("20.194892411578156")]
+    assert estaciones["longitud"].tolist() == [-103.35, float("-103.93877840801609")]
+    assert estaciones["codigo"].tolist() == ["GDL-001", "ZPN-002"]
+    assert estaciones["retirada"].tolist() == [False, True]  # capacidad 0
 
 
 def test_hash_contenido_sobrevive_parquet(tmp_path):
