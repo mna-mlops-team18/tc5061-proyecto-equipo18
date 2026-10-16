@@ -1,6 +1,6 @@
 {
   "dataset": "mibici-viajes",
-  "version": "060bfc3714aa",
+  "version": "06b0010a4627",
   "fuente": "https://mibici.net/es/datos-abiertos/",
   "mes_inicio": "2024-10",
   "mes_fin": "2026-09",
@@ -23,7 +23,7 @@
     "estaciones_activas": 470,
     "estaciones_retiradas": 14,
     "archivo_procesado": "processed/estaciones.parquet",
-    "sha256_contenido": "ffa3b48230f70ad155b392bdb0e23f9c3014fdd47341cffda2966347ec7ec3d5"
+    "sha256_contenido": "29cbffe56a69bfe958087db8b01203918e939247fd29645c26e21f9346175d1e"
   },
   "meses": [
     {

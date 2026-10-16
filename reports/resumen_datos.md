@@ -2,7 +2,7 @@
 
 Generado con `python -m tc5061_proyecto_equipo18.dataset resumen` a partir de `references/manifiesto_datos.json`. No editar a mano.
 
-- **Version de datos (`data_version`):** `060bfc3714aa`
+- **Version de datos (`data_version`):** `06b0010a4627`
 - **Rango:** 2024-10 a 2026-09 (24 meses con archivo; sin archivo: ninguno)
 - **Viajes:** 9,043,925 filas crudas y 9,043,167 viajes despues de la normalizacion
 - **Estaciones:** 484 en la nomenclatura (470 activas; 14 retiradas o sin capacidad); 472 con al menos un viaje en el rango
