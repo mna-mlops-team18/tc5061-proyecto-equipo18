@@ -1,12 +1,12 @@
-"""Configuración central del proyecto MiBici (equipo 18).
+"""Configuracion central del proyecto MiBici (equipo 18).
 
-Este es el ÚNICO lugar donde se definen rutas, fechas, semillas, fuentes de datos y
-parámetros de los experimentos. El resto de los módulos importa sus valores desde aquí,
-así que cambiar una decisión del equipo (por ejemplo, el rango de fechas) es cambiar una
-sola línea en un solo archivo.
+Este es el UNICO lugar donde se definen rutas, fechas, semillas, fuentes de datos y
+parametros de los experimentos. El resto de los modulos importa sus valores desde aqui,
+asi que cambiar una decision del equipo (por ejemplo, el rango de fechas) es cambiar una
+sola linea en un solo archivo.
 
 Las variables de entorno (archivo ``.env``, que nunca se versiona) solo se usan para
-valores que dependen de la máquina, como la URI de seguimiento de MLflow.
+valores que dependen de la maquina, como la URI de seguimiento de MLflow.
 """
 
 import os
@@ -36,8 +36,8 @@ REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 REFERENCES_DIR = PROJ_ROOT / "references"
 
-# Archivos que escriben y leen los módulos (todos dentro de data/, ignorado por Git,
-# salvo el manifiesto y el resumen, que solo contienen metadatos y sí se versionan).
+# Archivos que escriben y leen los modulos (todos dentro de data/, ignorado por Git,
+# salvo el manifiesto y el resumen, que solo contienen metadatos y si se versionan).
 RAW_VIAJES_DIR = RAW_DATA_DIR / "viajes"  # CSV originales, uno por mes
 VIAJES_DIR = PROCESSED_DATA_DIR / "viajes"  # Parquet limpio, uno por mes
 ESTACIONES_PARQUET = PROCESSED_DATA_DIR / "estaciones.parquet"
@@ -63,24 +63,24 @@ def ruta_modelo(nombre_run: str) -> Path:
 
 
 def ruta_predicciones(pregunta: str, particion: str) -> Path:
-    """Predicciones que escribe predict.py para una pregunta y una partición."""
+    """Predicciones que escribe predict.py para una pregunta y una particion."""
     return PROCESSED_DATA_DIR / f"predicciones_{pregunta.lower()}_{particion}.parquet"
 
 
 # =============================================================================
-# Rango de fechas y partición temporal (decisión del equipo; ver la propuesta)
+# Rango de fechas y particion temporal (decision del equipo; ver la propuesta)
 # =============================================================================
 # 24 meses recientes: dos ciclos anuales completos, red de estaciones actual,
 # sin el periodo de pandemia y sin los meses que el portal no publica (2023-04 y 2023-05).
 MES_INICIO = "2024-10"  # primer mes que se descarga (inclusive)
-MES_FIN = "2026-09"  # último mes que se descarga (inclusive)
+MES_FIN = "2026-09"  # ultimo mes que se descarga (inclusive)
 
-# Partición temporal: entrenamiento -> validación -> prueba, siempre hacia adelante.
+# Particion temporal: entrenamiento -> validacion -> prueba, siempre hacia adelante.
 FIN_ENTRENAMIENTO = "2026-03-31"  # entrenamiento: MES_INICIO a esta fecha (18 meses)
-FIN_VALIDACION = "2026-06-30"  # validación: abr-jun 2026; prueba: jul-sep 2026
+FIN_VALIDACION = "2026-06-30"  # validacion: abr-jun 2026; prueba: jul-sep 2026
 
 # =============================================================================
-# Semilla única para todo lo aleatorio (muestreo, modelos, clustering)
+# Semilla unica para todo lo aleatorio (muestreo, modelos, clustering)
 # =============================================================================
 SEMILLA = 42
 
@@ -96,8 +96,8 @@ USER_AGENT = "tc5061-equipo18-mlops/0.1 (proyecto academico, Tec de Monterrey)"
 
 RUTA_ESTACIONES = "1118/nomenclatura_2026_09.csv"
 
-# El identificador numérico de cada archivo no se puede deducir del mes, por eso se
-# guarda el catálogo completo tal como aparece en el portal (consultado en oct. 2026).
+# El identificador numerico de cada archivo no se puede deducir del mes, por eso se
+# guarda el catalogo completo tal como aparece en el portal (consultado en oct. 2026).
 RUTAS_VIAJES: dict[str, str | None] = {
     "2014-12": "1079/datos_abiertos_2014_12.csv",
     "2015-01": "1084/datos_abiertos_2015_01.csv",
@@ -247,13 +247,13 @@ RUTAS_VIAJES: dict[str, str | None] = {
 # Limpieza de viajes (features.filtrar_viajes_validos)
 # =============================================================================
 DURACION_MIN_SEG = 60  # menos de 1 minuto: desanclaje fallido o prueba de bicicleta
-DURACION_MAX_SEG = 4 * 60 * 60  # más de 4 horas: bicicleta mal anclada o registro anómalo
+DURACION_MAX_SEG = 4 * 60 * 60  # mas de 4 horas: bicicleta mal anclada o registro anomalo
 
 # =============================================================================
-# P1 - Regresión: salidas por estación y hora, con un día de anticipación
+# P1 - Regresion: salidas por estacion y hora, con un dia de anticipacion
 # =============================================================================
-P1_HORIZONTE_H = 24  # la predicción se hace al cierre del día anterior
-P1_REZAGOS_H = (24, 48, 168, 336)  # todos >= horizonte: nada posterior a la predicción
+P1_HORIZONTE_H = 24  # la prediccion se hace al cierre del dia anterior
+P1_REZAGOS_H = (24, 48, 168, 336)  # todos >= horizonte: nada posterior a la prediccion
 P1_MAX_FILAS_ENTRENAMIENTO = 3_000_000  # muestreo con SEMILLA para acotar memoria
 P1_HIPERPARAMETROS = {
     "loss": "poisson",  # conteos no negativos
@@ -268,7 +268,7 @@ P1_HIPERPARAMETROS = {
 }
 
 # =============================================================================
-# P2 - Clasificación: riesgo de vaciarse o llenarse en un bloque horario
+# P2 - Clasificacion: riesgo de vaciarse o llenarse en un bloque horario
 # =============================================================================
 P2_HORAS_BLOQUE = 3  # bloques 00-03, 03-06, ..., 21-24
 P2_UMBRAL_RIESGO = 0.5  # flujo neto >= 50 % de la capacidad dentro del bloque
@@ -288,7 +288,7 @@ P2_HIPERPARAMETROS = {
 # =============================================================================
 # P3 - Clustering: grupos de estaciones con patrones de uso parecidos
 # =============================================================================
-P3_MIN_VIAJES = 500  # salidas + llegadas mínimas en el periodo para perfilar una estación
+P3_MIN_VIAJES = 500  # salidas + llegadas minimas en el periodo para perfilar una estacion
 P3_GRUPOS_BASELINE = 4  # cuartiles de volumen
 P3_K_CANDIDATOS = (3, 4, 5, 6, 7, 8)
 P3_VARIANZA_PCA = 0.90
@@ -299,14 +299,14 @@ P3_HIPERPARAMETROS = {"n_init": 20}  # reinicios de K-means con distinta semilla
 # =============================================================================
 EQUIPO = "equipo18"
 MLFLOW_EXPERIMENTO = "mibici-equipo18"
-# Por defecto, base SQLite en la raíz del repo; se puede cambiar en .env
+# Por defecto, base SQLite en la raiz del repo; se puede cambiar en .env
 MLFLOW_TRACKING_URI = os.getenv(
     "MLFLOW_TRACKING_URI", f"sqlite:///{(PROJ_ROOT / 'mlflow.db').as_posix()}"
 )
 MLFLOW_ARTEFACTOS_DIR = PROJ_ROOT / "mlruns"
-# MLflow guarda los modelos de scikit-learn en formato skops (no ejecuta código al cargarlos).
-# Desde skops 0.15, los árboles de HistGradientBoosting no son "de confianza" por defecto;
-# como solo cargamos modelos que entrenamos nosotros, se declaran aquí de forma explícita.
+# MLflow guarda los modelos de scikit-learn en formato skops (no ejecuta codigo al cargarlos).
+# Desde skops 0.15, los arboles de HistGradientBoosting no son "de confianza" por defecto;
+# como solo cargamos modelos que entrenamos nosotros, se declaran aqui de forma explicita.
 SKOPS_TIPOS_CONFIABLES = ["sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
 
 # If tqdm is installed, configure loguru with tqdm.write

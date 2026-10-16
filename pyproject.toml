@@ -24,7 +24,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 99
 # Sintaxis compatible con 3.13: evita que el formateador use formas nuevas de 3.14
-# (p. ej. `except A, B:` sin paréntesis), que fallan en 3.13 y confunden al leer.
+# (p. ej. `except A, B:` sin parentesis), que fallan en 3.13 y confunden al leer.
 target-version = "py313"
 src = ["tc5061_proyecto_equipo18"]
 include = ["pyproject.toml", "tc5061_proyecto_equipo18/**/*.py", "tests/**/*.py"]

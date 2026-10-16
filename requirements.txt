@@ -1,4 +1,4 @@
-# Entorno del proyecto: Python 3.14 (ver README > Instalación).
+# Entorno del proyecto: Python 3.14 (ver README > Instalacion).
 # Versiones fijas (==) para que cualquier clon limpio instale exactamente lo mismo.
 
 # Datos, modelos y seguimiento de experimentos
@@ -10,14 +10,14 @@ scikit-learn==1.9.1
 skops==0.16.0  # formato seguro en que MLflow guarda los modelos de scikit-learn
 matplotlib==3.11.2
 
-# Ingesta y línea de comandos
+# Ingesta y linea de comandos
 requests==2.34.2
 typer==0.27.3
 loguru==0.7.3
 tqdm==4.70.1
 python-dotenv==1.2.4
 
-# Notebooks, pruebas, formato y documentación
+# Notebooks, pruebas, formato y documentacion
 ipykernel==7.4.0
 pytest==9.1.1
 ruff==0.17.0
