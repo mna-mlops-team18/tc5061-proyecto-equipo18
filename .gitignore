@@ -189,3 +189,38 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# =============================================================================
+# Proyecto MiBici - equipo 18
+# =============================================================================
+# Datos de MiBici (crudos, intermedios y procesados): nunca entran a Git.
+# La regla /data/ de arriba ya excluye la carpeta completa; los datos se
+# reconstruyen con `python -m tc5061_proyecto_equipo18.dataset ingest` y su
+# version queda en references/manifiesto_datos.json (ese si se versiona).
+# Por si alguien descarga o exporta datos fuera de data/:
+datos_abiertos_*.csv
+nomenclatura_*.csv
+*.parquet
+
+# Carpetas y base de datos que genera MLflow
+mlruns/
+mlartifacts/
+mlflow.db
+mlflow.db-journal
+
+# Modelos serializados (MLflow ya guarda el modelo de cada run)
+/models/*
+!/models/.gitkeep
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+
+# Credenciales y variables de entorno (solo se comparte .env.example)
+.env
+.env.*
+!.env.example
+
+# Configuracion local de editores
+.vscode/
+.idea/
