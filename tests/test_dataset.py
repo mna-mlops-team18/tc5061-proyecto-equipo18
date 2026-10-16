@@ -18,14 +18,19 @@ from tc5061_proyecto_equipo18.dataset import (
 )
 
 ENCABEZADO_REAL = [
-    "Viaje_Id", "Usuario_Id", "Genero", "Año_de_nacimiento",
+    "Viaje_Id", "Usuario_Id", "Genero", "A\u00f1o_de_nacimiento",
     "Inicio_del_viaje", "Fin_del_viaje", "Origen_Id", "Destino_Id",
 ]  # fmt: skip
 
 
 @pytest.mark.parametrize(
     "original",
-    ["Año_de_nacimiento", "A�o_de_nacimiento", "AÃ±o_de_nacimiento", "Birth_year"],
+    [
+        "A\u00f1o_de_nacimiento",
+        "A\ufffdo_de_nacimiento",
+        "A\u00c3\u00b1o_de_nacimiento",
+        "Birth_year",
+    ],
 )
 def test_variantes_de_anio_de_nacimiento_se_reconocen(original):
     assert mapear_columnas([original], ALIAS_VIAJES) == {original: "anio_nacimiento"}
@@ -33,7 +38,7 @@ def test_variantes_de_anio_de_nacimiento_se_reconocen(original):
 
 def test_normalizar_nombre_quita_acentos_y_espacios():
     assert normalizar_nombre(" Inicio del viaje ") == "inicio_del_viaje"
-    assert normalizar_nombre("Año_de_nacimiento") == "ano_de_nacimiento"
+    assert normalizar_nombre("A\u00f1o_de_nacimiento") == "ano_de_nacimiento"
 
 
 def test_encabezado_real_cubre_todo_el_esquema():
@@ -52,7 +57,7 @@ def test_encabezado_real_cubre_todo_el_esquema():
     [
         (["01/10/2024 0:00", "15/10/2024 7:05", "31/10/2024 23:59"], "2024-10", "%d/%m/%Y %H:%M"),
         (["2025-06-01 00:00:08", "2025-06-30 23:59:59"], "2025-06", "%Y-%m-%d %H:%M:%S"),
-        # día <= 12: solo el mes esperado distingue día/mes de mes/día
+        # dia <= 12: solo el mes esperado distingue dia/mes de mes/dia
         (["05/10/2024 8:00", "11/10/2024 9:30"], "2024-10", "%d/%m/%Y %H:%M"),
     ],
 )
@@ -71,8 +76,8 @@ def _escribir(tmp_path, nombre, texto, codificacion):
 
 
 def test_detectar_codificacion(tmp_path):
-    utf8 = _escribir(tmp_path, "a.csv", "﻿Año\n1\n", "utf-8")
-    cp1252 = _escribir(tmp_path, "b.csv", "Año\n1\n", "cp1252")
+    utf8 = _escribir(tmp_path, "a.csv", "\ufeffA\u00f1o\n1\n", "utf-8")
+    cp1252 = _escribir(tmp_path, "b.csv", "A\u00f1o\n1\n", "cp1252")
     assert detectar_codificacion(utf8) == "utf-8-sig"
     assert detectar_codificacion(cp1252) == "cp1252"
 

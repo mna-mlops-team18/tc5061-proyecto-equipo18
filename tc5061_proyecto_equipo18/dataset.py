@@ -1,27 +1,27 @@
 """Ingesta reproducible y versionada de los datos abiertos de MiBici.
 
-Comandos (desde la raíz del repositorio, con el ambiente activado)::
+Comandos (desde la raiz del repositorio, con el ambiente activado)::
 
     python -m tc5061_proyecto_equipo18.dataset ingest    # descarga, normaliza, Parquet y manifiesto
     python -m tc5061_proyecto_equipo18.dataset verify    # compara los datos locales con el manifiesto
-    python -m tc5061_proyecto_equipo18.dataset resumen   # tamaño real de los datos para el reporte
+    python -m tc5061_proyecto_equipo18.dataset resumen   # tamanio real de los datos para el reporte
 
 ``ingest`` no requiere pasos manuales:
 
 1. Descarga los meses de ``config.MES_INICIO`` a ``config.MES_FIN`` y la nomenclatura de
    estaciones a ``data/raw/``. Si un archivo ya existe, no lo vuelve a bajar.
-2. Detecta la codificación (UTF-8 o Windows-1252), el delimitador y el formato de fecha de
-   cada archivo, y lleva los nombres de columna a un esquema único en ``snake_case``.
-3. Descarta desde la lectura las columnas con datos personales (usuario, género y año de
+2. Detecta la codificacion (UTF-8 o Windows-1252), el delimitador y el formato de fecha de
+   cada archivo, y lleva los nombres de columna a un esquema unico en ``snake_case``.
+3. Descarta desde la lectura las columnas con datos personales (usuario, genero y anio de
    nacimiento): nunca llegan a los datos procesados ni a MLflow.
 4. Guarda un Parquet por mes en ``data/processed/viajes/`` y las estaciones en
    ``data/processed/estaciones.parquet``.
-5. Escribe ``references/manifiesto_datos.json`` con el número de registros y el hash SHA-256
-   de cada archivo crudo y de su contenido limpio. La versión de los datos es un hash de esos
+5. Escribe ``references/manifiesto_datos.json`` con el numero de registros y el hash SHA-256
+   de cada archivo crudo y de su contenido limpio. La version de los datos es un hash de esos
    hashes; es el valor que se registra en MLflow como ``data_version``.
 
-Si el manifiesto ya existe (porque está versionado en Git), ``ingest`` comprueba que los datos
-reconstruidos sean idénticos y solo lo reescribe con ``--actualizar-manifiesto``.
+Si el manifiesto ya existe (porque esta versionado en Git), ``ingest`` comprueba que los datos
+reconstruidos sean identicos y solo lo reescribe con ``--actualizar-manifiesto``.
 """
 
 import codecs
@@ -76,9 +76,9 @@ TIPOS_ESTACIONES = {
     "retirada": "bool",
 }
 
-# Alias de columnas, aplicados sobre el nombre ya normalizado (sin acentos, minúsculas).
-# Cubren las variantes vistas en una muestra de archivos de 2014 a 2026 (incluida la "ñ" mal
-# codificada de "Año_de_nacimiento", que aparece como "A?o") y algunos nombres alternativos
+# Alias de columnas, aplicados sobre el nombre ya normalizado (sin acentos, minusculas).
+# Cubren las variantes vistas en una muestra de archivos de 2014 a 2026 (incluida la enie mal
+# codificada de "Anio_de_nacimiento", que aparece como "A?o") y algunos nombres alternativos
 # por si el portal los cambia.
 ALIAS_VIAJES = (
     (r"^(viaje_id|id_viaje|trip_id)$", "viaje_id"),
@@ -103,7 +103,7 @@ ALIAS_ESTACIONES = (
 )
 
 # Formatos de fecha vistos en el portal ("2025-06-01 00:00:08" y "01/10/2024 0:00") y
-# variantes cercanas. Se elige, por archivo, el que deja más viajes dentro del mes esperado.
+# variantes cercanas. Se elige, por archivo, el que deja mas viajes dentro del mes esperado.
 FORMATOS_FECHA = (
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
@@ -118,21 +118,21 @@ VALORES_NULOS = ["", "NULL", "null", "NA", "N/A", "None", "nan"]
 
 
 # =============================================================================
-# Utilidades de normalización
+# Utilidades de normalizacion
 # =============================================================================
 def meses_en_rango(mes_inicio: str, mes_fin: str) -> list[str]:
     """Devuelve los meses ``AAAA-MM`` entre ``mes_inicio`` y ``mes_fin``, ambos inclusive."""
     if pd.Period(mes_inicio, "M") > pd.Period(mes_fin, "M"):
-        raise ValueError(f"El rango está invertido: {mes_inicio} > {mes_fin}")
+        raise ValueError(f"El rango esta invertido: {mes_inicio} > {mes_fin}")
     return [str(periodo) for periodo in pd.period_range(mes_inicio, mes_fin, freq="M")]
 
 
 def normalizar_nombre(nombre: str) -> str:
     """Lleva un nombre de columna a ``snake_case`` ASCII.
 
-    Quita acentos y caracteres que no son letras o dígitos, de modo que "Año_de_nacimiento",
-    "A�o_de_nacimiento" y "AÃ±o_de_nacimiento" terminen en variantes reconocibles por
-    los alias (todas contienen "nacimiento").
+    Quita acentos y caracteres que no son letras o digitos, de modo que las variantes del
+    encabezado del anio de nacimiento (con enie, con la enie rota o mal decodificada) terminen
+    en nombres reconocibles por los alias (todas contienen "nacimiento").
     """
     texto = unicodedata.normalize("NFKD", str(nombre))
     texto = texto.encode("ascii", "ignore").decode("ascii")
@@ -140,9 +140,9 @@ def normalizar_nombre(nombre: str) -> str:
 
 
 def mapear_columnas(columnas: list[str], alias: tuple[tuple[str, str], ...]) -> dict[str, str]:
-    """Relaciona cada columna original con su nombre canónico según ``alias``.
+    """Relaciona cada columna original con su nombre canonico segun ``alias``.
 
-    Las columnas que no coinciden con ningún alias se omiten del resultado.
+    Las columnas que no coinciden con ningun alias se omiten del resultado.
     """
     mapa: dict[str, str] = {}
     for original in columnas:
@@ -159,7 +159,7 @@ def mapear_columnas(columnas: list[str], alias: tuple[tuple[str, str], ...]) -> 
 def detectar_codificacion(ruta: Path, tam_bloque: int = 1 << 20) -> str:
     """Detecta si un archivo es UTF-8 (con o sin BOM) o Windows-1252.
 
-    Algunos meses de MiBici vienen en UTF-8 y otros en Windows-1252 (por eso la "ñ" se ve
+    Algunos meses de MiBici vienen en UTF-8 y otros en Windows-1252 (por eso la enie se ve
     rota en ciertos encabezados). Se valida el archivo completo con un decodificador
     incremental para no cargarlo entero en memoria.
     """
@@ -173,11 +173,11 @@ def detectar_codificacion(ruta: Path, tam_bloque: int = 1 << 20) -> str:
             return codificacion
         except UnicodeDecodeError:
             continue
-    return "latin-1"  # nunca falla: cada byte es un carácter
+    return "latin-1"  # nunca falla: cada byte es un caracter
 
 
 def leer_encabezado(ruta: Path, codificacion: str) -> tuple[list[str], str]:
-    """Lee la primera línea, detecta el delimitador y devuelve los nombres de columna."""
+    """Lee la primera linea, detecta el delimitador y devuelve los nombres de columna."""
     with ruta.open(encoding=codificacion, newline="") as archivo:
         primera_linea = archivo.readline()
     delimitador = max((",", ";", "\t", "|"), key=primera_linea.count)
@@ -188,13 +188,13 @@ def leer_encabezado(ruta: Path, codificacion: str) -> tuple[list[str], str]:
 def elegir_formato_fecha(valores: pd.Series, mes: str | None = None) -> str:
     """Elige el formato de fecha que mejor interpreta una columna.
 
-    Prueba cada formato de ``FORMATOS_FECHA`` sobre una muestra sistemática (determinista).
-    Si se conoce el mes del archivo, gana el formato que deja más fechas dentro de ese mes;
-    así se distingue día/mes de mes/día. Exige al menos 95 % de fechas válidas.
+    Prueba cada formato de ``FORMATOS_FECHA`` sobre una muestra sistematica (determinista).
+    Si se conoce el mes del archivo, gana el formato que deja mas fechas dentro de ese mes;
+    asi se distingue dia/mes de mes/dia. Exige al menos 95 % de fechas validas.
     """
     muestra = valores.dropna().astype(str).str.strip()
     if muestra.empty:
-        raise ValueError("La columna de fechas está vacía")
+        raise ValueError("La columna de fechas esta vacia")
     muestra = muestra.iloc[:: max(1, len(muestra) // 5000)]
     periodo = pd.Period(mes, "M") if mes else None
 
@@ -222,7 +222,7 @@ def tipos_canonicos(df: pd.DataFrame, tipos: dict[str, str]) -> pd.DataFrame:
 
 
 def hash_archivo(ruta: Path) -> str:
-    """SHA-256 del archivo tal como está en disco (huella del CSV publicado)."""
+    """SHA-256 del archivo tal como esta en disco (huella del CSV publicado)."""
     huella = hashlib.sha256()
     with ruta.open("rb") as archivo:
         while bloque := archivo.read(1 << 20):
@@ -233,9 +233,9 @@ def hash_archivo(ruta: Path) -> str:
 def hash_contenido(df: pd.DataFrame) -> str:
     """SHA-256 del contenido de una tabla, independiente del formato de archivo.
 
-    Usa el hash por fila de pandas más los nombres de columna. A diferencia del hash del
-    Parquet, no cambia por metadatos del escritor, así que sirve para verificar en otra
-    computadora que los datos limpios son idénticos.
+    Usa el hash por fila de pandas mas los nombres de columna. A diferencia del hash del
+    Parquet, no cambia por metadatos del escritor, asi que sirve para verificar en otra
+    computadora que los datos limpios son identicos.
     """
     filas = pd.util.hash_pandas_object(df, index=False).to_numpy()
     huella = hashlib.sha256(filas.tobytes())
@@ -253,7 +253,7 @@ def ruta_relativa(ruta: Path) -> str:
 # =============================================================================
 @dataclass
 class LecturaViajes:
-    """Resultado de leer un CSV mensual: los datos limpios y lo que se observó del archivo."""
+    """Resultado de leer un CSV mensual: los datos limpios y lo que se observo del archivo."""
 
     datos: pd.DataFrame
     codificacion: str
@@ -268,11 +268,11 @@ class LecturaViajes:
 def leer_viajes_crudos(ruta: Path, mes: str | None = None) -> LecturaViajes:
     """Lee un CSV mensual de viajes y lo devuelve con el esquema normalizado.
 
-    - Normaliza los nombres de columna (acentos, mayúsculas, "ñ" mal codificada).
-    - Carga solo las columnas del esquema: usuario, género y año de nacimiento no se leen.
+    - Normaliza los nombres de columna (acentos, mayusculas, enie mal codificada).
+    - Carga solo las columnas del esquema: usuario, genero y anio de nacimiento no se leen.
     - Convierte identificadores a enteros y fechas con el formato detectado para el archivo.
-    - Elimina filas sin fecha o sin estación y viajes con identificador repetido.
-    - Agrega ``duracion_seg`` y ordena por inicio para que el contenido sea canónico.
+    - Elimina filas sin fecha o sin estacion y viajes con identificador repetido.
+    - Agrega ``duracion_seg`` y ordena por inicio para que el contenido sea canonico.
     """
     codificacion = detectar_codificacion(ruta)
     encabezado, delimitador = leer_encabezado(ruta, codificacion)
@@ -281,7 +281,7 @@ def leer_viajes_crudos(ruta: Path, mes: str | None = None) -> LecturaViajes:
     if faltantes:
         raise ValueError(
             f"{ruta.name}: no se reconocen las columnas {faltantes}. "
-            f"Encabezado leído: {encabezado}. Agrega el alias en ALIAS_VIAJES."
+            f"Encabezado leido: {encabezado}. Agrega el alias en ALIAS_VIAJES."
         )
     usar = [original for original, canonica in mapa.items() if canonica in COLUMNAS_VIAJES]
     descartadas = [columna for columna in encabezado if columna not in usar]
@@ -344,9 +344,9 @@ def leer_viajes_crudos(ruta: Path, mes: str | None = None) -> LecturaViajes:
 def leer_estaciones_crudas(ruta: Path) -> tuple[pd.DataFrame, str]:
     """Lee la nomenclatura de estaciones y la normaliza.
 
-    Además de identificador, nombre, coordenadas y capacidad, extrae del nombre el código
-    de la estación y el municipio, p. ej. "(GDL-001) C. Epigmenio..." -> ``GDL-001`` y
-    ``GDL``. Marca como ``retirada`` la estación con prefijo "ex-" o capacidad 0.
+    Ademas de identificador, nombre, coordenadas y capacidad, extrae del nombre el codigo
+    de la estacion y el municipio, p. ej. "(GDL-001) C. Epigmenio..." -> ``GDL-001`` y
+    ``GDL``. Marca como ``retirada`` la estacion con prefijo "ex-" o capacidad 0.
     """
     codificacion = detectar_codificacion(ruta)
     encabezado, delimitador = leer_encabezado(ruta, codificacion)
@@ -370,7 +370,7 @@ def leer_estaciones_crudas(ruta: Path) -> tuple[pd.DataFrame, str]:
     if "capacidad" in df.columns:
         df["capacidad"] = pd.to_numeric(df["capacidad"].str.strip(), errors="coerce").fillna(0)
     else:
-        logger.warning("La nomenclatura no trae capacidad; P2 no podrá etiquetar el riesgo.")
+        logger.warning("La nomenclatura no trae capacidad; P2 no podra etiquetar el riesgo.")
         df["capacidad"] = 0
 
     df["nombre"] = df["nombre"].fillna("").str.strip().str.replace(r"\s+", " ", regex=True)
@@ -397,7 +397,7 @@ def leer_estaciones_crudas(ruta: Path) -> tuple[pd.DataFrame, str]:
 # Descarga
 # =============================================================================
 def crear_sesion_http() -> requests.Session:
-    """Sesión HTTP con reintentos automáticos ante errores temporales del servidor."""
+    """Sesion HTTP con reintentos automaticos ante errores temporales del servidor."""
     reintentos = Retry(
         total=5,
         backoff_factor=1.0,
@@ -412,7 +412,7 @@ def crear_sesion_http() -> requests.Session:
 
 
 def descargar(url: str, destino: Path, sesion: requests.Session, forzar: bool = False) -> bool:
-    """Descarga ``url`` en ``destino`` (vía archivo temporal). Devuelve si hubo descarga."""
+    """Descarga ``url`` en ``destino`` (via archivo temporal). Devuelve si hubo descarga."""
     if destino.exists() and not forzar:
         return False
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -421,7 +421,7 @@ def descargar(url: str, destino: Path, sesion: requests.Session, forzar: bool = 
         respuesta.raise_for_status()
         if "text/html" in respuesta.headers.get("content-type", ""):
             raise RuntimeError(
-                f"{url} devolvió una página HTML en lugar de un CSV. "
+                f"{url} devolvio una pagina HTML en lugar de un CSV. "
                 f"Revisa el enlace en config.RUTAS_VIAJES contra {config.URL_PORTAL_DATOS}"
             )
         total = int(respuesta.headers.get("content-length", 0)) or None
@@ -441,7 +441,7 @@ def descargar(url: str, destino: Path, sesion: requests.Session, forzar: bool = 
 # =============================================================================
 @dataclass
 class RegistroMes:
-    """Huella de un mes de viajes: de dónde vino, qué se leyó y cómo quedó."""
+    """Huella de un mes de viajes: de donde vino, que se leyo y como quedo."""
 
     mes: str
     url: str
@@ -484,7 +484,7 @@ class Manifiesto:
     """Manifiesto versionado en Git que identifica exactamente los datos usados.
 
     La ``version`` es un hash del rango y del contenido limpio de cada archivo: si cambia
-    un solo viaje, cambia la versión. Ese valor se registra en cada run de MLflow.
+    un solo viaje, cambia la version. Ese valor se registra en cada run de MLflow.
     """
 
     mes_inicio: str
@@ -530,7 +530,7 @@ class Manifiesto:
             if a is None or b is None:
                 difs.append(f"{mes}: aparece solo en uno de los manifiestos")
             elif a.sha256_crudo != b.sha256_crudo:
-                difs.append(f"{mes}: el CSV del portal cambió (SHA-256 crudo distinto)")
+                difs.append(f"{mes}: el CSV del portal cambio (SHA-256 crudo distinto)")
             elif a.sha256_contenido != b.sha256_contenido or a.filas_limpias != b.filas_limpias:
                 difs.append(
                     f"{mes}: contenido limpio distinto ({a.filas_limpias} vs {b.filas_limpias})"
@@ -548,7 +548,7 @@ class Manifiesto:
 
     def guardar(self, ruta: Path) -> None:
         ruta.parent.mkdir(parents=True, exist_ok=True)
-        texto = json.dumps(self.a_dict(), indent=2, ensure_ascii=False)
+        texto = json.dumps(self.a_dict(), indent=2)  # ASCII: lo que no lo es va como \uXXXX
         ruta.write_text(texto + "\n", encoding="utf-8")
 
     @classmethod
@@ -565,7 +565,7 @@ class Manifiesto:
 
 
 def describir_entorno() -> dict[str, str]:
-    """Versiones con las que se generaron los datos (informativo, no entra en la versión)."""
+    """Versiones con las que se generaron los datos (informativo, no entra en la version)."""
     entorno = {"python": platform.python_version()}
     for paquete in ("pandas", "numpy", "pyarrow"):
         try:
@@ -650,7 +650,7 @@ def procesar_mes(
 @app.command()
 def ingest(
     mes_inicio: str = typer.Option(config.MES_INICIO, help="Primer mes AAAA-MM (inclusive)."),
-    mes_fin: str = typer.Option(config.MES_FIN, help="Último mes AAAA-MM (inclusive)."),
+    mes_fin: str = typer.Option(config.MES_FIN, help="Ultimo mes AAAA-MM (inclusive)."),
     forzar_descarga: bool = typer.Option(False, help="Vuelve a bajar los CSV aunque existan."),
     actualizar_manifiesto: bool = typer.Option(
         False, help="Reescribe el manifiesto aunque los datos difieran del versionado."
@@ -691,8 +691,8 @@ def ingest(
         diferencias = anterior.diferencias(manifiesto)
         if not diferencias:
             logger.success(
-                f"Datos reconstruidos idénticos al manifiesto versionado "
-                f"(versión {manifiesto.version}, {manifiesto.total_viajes:,} viajes)."
+                f"Datos reconstruidos identicos al manifiesto versionado "
+                f"(version {manifiesto.version}, {manifiesto.total_viajes:,} viajes)."
             )
             return
         if not actualizar_manifiesto:
@@ -707,14 +707,14 @@ def ingest(
     manifiesto.guardar(config.MANIFIESTO_DATOS)
     logger.success(
         f"Manifiesto guardado en {config.MANIFIESTO_DATOS.relative_to(config.PROJ_ROOT)}: "
-        f"versión {manifiesto.version}, {len(registros)} meses, "
+        f"version {manifiesto.version}, {len(registros)} meses, "
         f"{manifiesto.total_viajes:,} viajes, {manifiesto.estaciones_con_viajes} estaciones con viajes."
     )
 
 
 @app.command()
 def verify(
-    revisar_crudos: bool = typer.Option(True, help="También compara el hash de los CSV crudos."),
+    revisar_crudos: bool = typer.Option(True, help="Tambien compara el hash de los CSV crudos."),
 ):
     """Comprueba que los datos locales coinciden exactamente con el manifiesto versionado."""
     manifiesto = Manifiesto.cargar()
@@ -755,14 +755,14 @@ def verify(
         )
         raise typer.Exit(code=1)
     logger.success(
-        f"Datos verificados: versión {manifiesto.version}, {len(manifiesto.meses)} meses, "
+        f"Datos verificados: version {manifiesto.version}, {len(manifiesto.meses)} meses, "
         f"{manifiesto.total_viajes:,} viajes. Coinciden con el manifiesto."
     )
 
 
 @app.command()
 def resumen():
-    """Escribe reports/resumen_datos.md con el tamaño real de los datos (desde el manifiesto)."""
+    """Escribe reports/resumen_datos.md con el tamanio real de los datos (desde el manifiesto)."""
     manifiesto = Manifiesto.cargar()
     est = manifiesto.estaciones
     filas = [
@@ -781,14 +781,14 @@ def resumen():
                 "`references/manifiesto_datos.json`. No editar a mano."
             ),
             "",
-            f"- **Versión de datos (`data_version`):** `{manifiesto.version}`",
+            f"- **Version de datos (`data_version`):** `{manifiesto.version}`",
             (
                 f"- **Rango:** {manifiesto.mes_inicio} a {manifiesto.mes_fin} "
                 f"({len(manifiesto.meses)} meses con archivo; sin archivo: {sin_archivo})"
             ),
             (
                 f"- **Viajes:** {total_crudas:,} filas crudas y {manifiesto.total_viajes:,} viajes "
-                "después de la normalización"
+                "despues de la normalizacion"
             ),
             (
                 f"- **Estaciones:** {est.estaciones} en la nomenclatura ({est.estaciones_activas} "
@@ -798,8 +798,8 @@ def resumen():
             f"- **Fuente:** {manifiesto.fuente}",
             "",
             (
-                "| Mes | Filas crudas | Sin fecha o estación | Duplicados | Viajes limpios "
-                "| Estaciones con viajes | Codificación | Formato de fecha |"
+                "| Mes | Filas crudas | Sin fecha o estacion | Duplicados | Viajes limpios "
+                "| Estaciones con viajes | Codificacion | Formato de fecha |"
             ),
             "|---|---:|---:|---:|---:|---:|---|---|",
             *filas,
