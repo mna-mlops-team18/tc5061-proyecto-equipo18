@@ -15,20 +15,6 @@ META = {
 }
 
 
-@pytest.fixture
-def mlflow_temporal(tmp_path, monkeypatch):
-    """MLflow en una base SQLite temporal; nada se escribe en el repo."""
-    monkeypatch.setattr(config, "FIGURAS_EXPERIMENTO_DIR", tmp_path / "figuras")
-    monkeypatch.setattr(config, "MODELS_DIR", tmp_path / "models")
-    comun.configurar_mlflow(
-        tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}",
-        experimento="prueba",
-        artefactos_dir=tmp_path / "mlruns",
-    )
-    yield
-    mlflow.set_tracking_uri(None)
-
-
 def test_separar_particiones_por_fecha_y_por_periodo():
     fechas = pd.to_datetime([config.FIN_ENTRENAMIENTO, config.FIN_VALIDACION, "2026-09-30"])
     partes = comun.separar_particiones(pd.DataFrame({"hora": fechas}), "hora")
