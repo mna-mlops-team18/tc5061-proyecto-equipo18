@@ -136,7 +136,8 @@ def iniciar_run(
 
     Registra la version de los datos (``data_version``), que se valida contra el manifiesto al
     leer los metadatos de features: si los datos o config.py cambiaron, falla antes de entrenar.
-    ``parametros`` son los hiperparametros propios del modelo.
+    ``data_version`` y ``modelo`` quedan como tags y tambien como parametros, junto a
+    ``parametros`` (los hiperparametros propios del modelo).
     """
     if pregunta not in PREGUNTAS:
         raise ValueError(f"Pregunta desconocida: {pregunta}; opciones {PREGUNTAS}")
@@ -157,6 +158,10 @@ def iniciar_run(
                 "semilla": config.SEMILLA,
                 **{f"features.{clave}": valor for clave, valor in meta["parametros"].items()},
                 **(parametros or {}),
+                # Tambien como parametros (no solo tags) para compararlos junto a los
+                # hiperparametros; van al final para que ``parametros`` no los sobrescriba.
+                "data_version": meta["data_version"],
+                "modelo": modelo,
             }
         )
         mlflow.log_dict(meta, "datos/features_meta.json")

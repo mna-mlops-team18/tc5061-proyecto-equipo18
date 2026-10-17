@@ -59,6 +59,9 @@ def test_run_registra_version_de_datos_metricas_y_modelo(mlflow_temporal):
     assert "git_commit" in datos.tags
     assert datos.params["semilla"] == str(config.SEMILLA)
     assert datos.params["features.mes_inicio"] == "2024-10"
+    assert datos.params["data_version"] == "abc123def456"
+    assert datos.params["modelo"] == "media"
+    assert datos.params["estrategia"] == "mean"
     assert datos.metrics == {"validacion_mae": 1.5}
     assert run.info.run_name == "p1-baseline-media"
     assert config.ruta_modelo(run.info.run_name).exists()
