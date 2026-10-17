@@ -255,6 +255,7 @@ DURACION_MAX_SEG = 4 * 60 * 60  # mas de 4 horas: bicicleta mal anclada o regist
 P1_HORIZONTE_H = 24  # la prediccion se hace al cierre del dia anterior
 P1_REZAGOS_H = (24, 48, 168, 336)  # todos >= horizonte: nada posterior a la prediccion
 P1_MAX_FILAS_ENTRENAMIENTO = 3_000_000  # muestreo con SEMILLA para acotar memoria
+P1_FILAS_IMPORTANCIA = 50_000  # filas de validacion para la importancia por permutacion
 P1_HIPERPARAMETROS = {
     "loss": "poisson",  # conteos no negativos
     "learning_rate": 0.08,
