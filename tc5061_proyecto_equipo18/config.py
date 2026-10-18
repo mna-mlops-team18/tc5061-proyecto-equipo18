@@ -274,6 +274,7 @@ P1_HIPERPARAMETROS = {
 P2_HORAS_BLOQUE = 3  # bloques 00-03, 03-06, ..., 21-24
 P2_UMBRAL_RIESGO = 0.5  # flujo neto >= 50 % de la capacidad dentro del bloque
 P2_CLASES = {0: "sin_riesgo", 1: "riesgo_vaciado", 2: "riesgo_llenado"}
+P2_FILAS_IMPORTANCIA = 50_000  # filas de validacion para la importancia por permutacion
 P2_HIPERPARAMETROS = {
     "learning_rate": 0.08,
     "max_iter": 300,
