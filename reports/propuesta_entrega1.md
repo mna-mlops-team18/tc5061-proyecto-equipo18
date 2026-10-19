@@ -7,9 +7,6 @@ propuesta describe como el equipo responde con Machine Learning las tres pregunt
 proyecto, que datos usa, el pipeline y la arquitectura, y el experimento base registrado en
 MLflow que sirve como linea de referencia para el resto del curso.
 
-> **Pendientes antes de entregar** (buscar `PENDIENTE` en este archivo): la tabla de metricas
-> del experimento base con los datos reales, la lectura de resultados y las capturas de MLflow.
-
 **Contenido**
 
 1. [Formulacion del problema](#1-formulacion-del-problema)
@@ -51,7 +48,7 @@ estacion en un perfil y lo ubica en el mapa. Los grupos de P3 tambien pueden ser
 
 | Criterio | Justificacion |
 |---|---|
-| **Representatividad** | Son los meses mas recientes: reflejan la red de estaciones y los habitos actuales, y coinciden con la nomenclatura vigente (`nomenclatura_2026_09.csv`), que es la unica que trae capacidad |
+| **Representatividad** | Son los meses mas recientes: reflejan los habitos de uso actuales y coinciden con la nomenclatura vigente (`nomenclatura_2026_09.csv`), que es la unica que trae capacidad. La red no es estable dentro del rango: de junio a septiembre de 2026 crece el numero de estaciones con viajes (seccion 2.3) |
 | **Estacionalidad** | Dos ciclos anuales completos: el entrenamiento ya contiene vacaciones, lluvias, fin de anio y Semana Santa, y la prueba (jul-sep 2026) tiene su equivalente del anio anterior en el entrenamiento |
 | **Calidad** | Evita la caida atipica de 2020-2021 (pandemia) y los dos meses que el portal no publica (abril y mayo de 2023) |
 | **Volumen** | Entre 315 mil y 490 mil viajes por mes, 9.04 millones en total: suficiente para los tres modelos y procesable en una laptop |
@@ -101,14 +98,18 @@ Generado por la ingesta a partir del manifiesto versionado (`references/manifies
 | Estaciones en la nomenclatura | 484 (470 activas; 14 retiradas o sin capacidad) |
 | Estaciones con al menos un viaje en el rango | 472 |
 | Version de datos (`data_version`) | `06b0010a4627` |
-| Viajes validos tras los filtros de limpieza | PENDIENTE: `filtros` en `data/processed/features_meta.json` |
+| Viajes validos tras los filtros de limpieza | 8,766,469 de 9,043,167 (96.9 %): se quitan 272,223 de menos de 1 minuto, 607 de mas de 4 horas y 3,868 con estaciones fuera de la nomenclatura (`filtros` en `data/processed/features_meta.json`) |
+| Estaciones modeladas (vigentes) | 470 |
+| Filas por pregunta | P1: 6,501,768 (estacion x hora); P2: 2,193,520 (estacion x bloque); P3: 370 / 374 / 459 perfiles en entrenamiento / validacion / prueba |
+| Prevalencia de las clases de P2 | sin riesgo 97.07 %, riesgo de vaciado 1.47 %, riesgo de llenado 1.46 % |
 
 **Observacion de los datos reales:** las estaciones con viajes por mes pasan de 360-371
-(oct-2024 a may-2026) a 427, 453, 467 y 468 de junio a septiembre de 2026. Casi 100 estaciones
-nuevas aparecen en validacion y prueba. Consecuencias: en P1 y P2 una estacion nueva entra al
-modelo cuando ya tiene la historia que piden los rezagos (14 dias en P1, 7 en P2); en P3 la
-estabilidad se mide solo con las estaciones presentes en ambos periodos y las nuevas se asignan
-al grupo mas cercano.
+(oct-2024 a may-2026) a 427, 453, 467 y 468 de junio a septiembre de 2026: cerca de 100
+estaciones mas registran viajes en validacion y prueba (no se ha confirmado si son altas nuevas
+o reactivaciones). En P3, 90 de los 459 perfiles de prueba son de estaciones sin perfil en
+entrenamiento. Consecuencias: en P1 y P2 una estacion entra al modelo cuando ya tiene la
+historia que piden los rezagos (14 dias en P1, 7 en P2); en P3 la estabilidad se mide solo con
+las estaciones presentes en ambos periodos y las demas se asignan al grupo mas cercano.
 
 ### 2.4 Variables originales y construccion de los objetivos
 
@@ -193,7 +194,7 @@ de 4 horas y con estaciones fuera de la nomenclatura):
 |---|---|---|
 | Entrenamiento | 1-oct-2024 a 31-mar-2026 (18 meses) | Ajustar modelos, escaladores, PCA y grupos |
 | Validacion | 1-abr-2026 a 30-jun-2026 (3 meses) | Comparar baseline y candidato y elegir alternativas |
-| Prueba | 1-jul-2026 a 30-sep-2026 (3 meses) | Estimacion final; se reporta una sola vez por modelo elegido |
+| Prueba | 1-jul-2026 a 30-sep-2026 (3 meses) | Estimacion final; se calcula en cada run, pero no se usa para elegir modelos ni hiperparametros |
 
 Medidas contra la fuga de informacion:
 
@@ -211,10 +212,15 @@ Medidas contra la fuga de informacion:
    K-means de P3 se ajustan con los perfiles del periodo de entrenamiento; los de
    validacion y prueba se calculan por separado y solo se asignan. El numero de grupos se
    elige con la silhouette de entrenamiento.
-5. **Catalogo de estaciones:** el portal solo publica la nomenclatura vigente (sep-2026),
-   asi que la capacidad y la ubicacion se toman de ese corte para todo el periodo. Para que
-   la capacidad no delate que estaciones se retiraran, en las tres preguntas se modelan solo
-   las estaciones vigentes (sin prefijo "ex-" y con capacidad > 0).
+
+Riesgo que no se elimina: el portal solo publica la nomenclatura vigente (sep-2026), asi que
+la capacidad y la ubicacion se toman de ese corte para todo el periodo, y en las tres preguntas
+se modelan solo las estaciones vigentes (sin prefijo "ex-" y con capacidad > 0). Elegir las
+estaciones con un catalogo del final del periodo **si usa informacion del futuro**: excluye
+desde el entrenamiento a las 14 estaciones que despues se retiraron (sesgo de supervivencia).
+Se acepta porque no hay catalogos historicos y porque sin capacidad no se puede construir la
+etiqueta de P2; el efecto esperado es que las metricas describan solo a las estaciones que
+siguen operando. Se discute en la seccion 8.
 
 ### 2.7 Versionado y reproducibilidad de los datos
 
@@ -303,8 +309,9 @@ despues se ubican en el mapa, que es justo lo que pregunta P3.
 - **P3:** escalado, PCA (90 % de la varianza) y K-means se ajustan con los perfiles de
   entrenamiento; k se elige entre 3 y 8 por silhouette de entrenamiento. Se mide la calidad en
   cada periodo y la estabilidad en validacion y prueba.
-- Todo es determinista con `config.SEMILLA`: repetir un run con los mismos datos y el mismo
-  commit da exactamente las mismas metricas.
+- Todo es determinista con `config.SEMILLA`: al repetir los 6 runs con los mismos datos y el
+  mismo codigo, las 87 metricas registradas coincidieron exactamente con las de los runs
+  oficiales.
 
 ---
 
@@ -379,14 +386,56 @@ aparte sin duplicar el registro.
 - **Experimento:** `mibici-equipo18`.
 - **Runs** (uno por modelo; nombres descriptivos, nunca los aleatorios por defecto):
 
-| Run | Pregunta | Modelo | Metricas principales (prueba) |
-|---|---|---|---|
-| `p1-baseline-rezago_semanal` | P1 | Rezago semanal | PENDIENTE `prueba_mae`, `prueba_wape` |
-| `p1-candidato-hgb_poisson` | P1 | HistGradientBoosting (Poisson) | PENDIENTE |
-| `p2-baseline-frecuencia_mismo_bloque` | P2 | Clase mas frecuente del bloque en 7 dias | PENDIENTE `prueba_f1_macro`, `prueba_recall_vaciado`, `prueba_recall_llenado` |
-| `p2-candidato-hgb_balanceado` | P2 | HistGradientBoosting (balanceado) | PENDIENTE |
-| `p3-baseline-cuartiles_volumen` | P3 | Cuartiles de volumen | PENDIENTE `entrenamiento_silhouette`, `prueba_estabilidad_ari` |
-| `p3-candidato-kmeans_pca` | P3 | K-means sobre PCA (k por silhouette) | PENDIENTE |
+| Run | Pregunta | Modelo |
+|---|---|---|
+| `p1-baseline-rezago_semanal` | P1 | Rezago semanal |
+| `p1-candidato-hgb_poisson` | P1 | HistGradientBoosting (Poisson) |
+| `p2-baseline-frecuencia_mismo_bloque` | P2 | Clase mas frecuente del bloque en 7 dias |
+| `p2-candidato-hgb_balanceado` | P2 | HistGradientBoosting (balanceado) |
+| `p3-baseline-cuartiles_volumen` | P3 | Cuartiles de volumen |
+| `p3-candidato-kmeans_pca` | P3 | K-means sobre PCA (k = 3, elegido por silhouette) |
+
+Los 6 runs se ejecutaron el 18 de octubre de 2026 desde `main` (commit `94871ea`, `git_sucio`
+= `false`) con `data_version` `06b0010a4627`.
+
+### Resultados del experimento base
+
+Valores de `validacion_*` (para comparar y elegir) y `prueba_*` (estimacion final), tal como
+quedaron registrados en MLflow. En negritas, el mejor de cada par en la metrica de eleccion.
+
+**P1 - Demanda por estacion y hora**
+
+| Metrica | Baseline, validacion | Candidato, validacion | Baseline, prueba | Candidato, prueba |
+|---|---|---|---|---|
+| MAE (viajes por hora) | 0.951 | **0.752** | 0.899 | 0.732 |
+| RMSE | 1.914 | 1.390 | 1.808 | 1.350 |
+| WAPE | 0.794 | 0.628 | 0.736 | 0.599 |
+| Devianza Poisson | 6.773 | 0.963 | 6.306 | 0.911 |
+| R2 | 0.301 | 0.631 | 0.430 | 0.683 |
+
+**P2 - Riesgo de desabasto por estacion y bloque de 3 h**
+
+| Metrica | Baseline, validacion | Candidato, validacion | Baseline, prueba | Candidato, prueba |
+|---|---|---|---|---|
+| F1 macro | **0.537** | 0.434 | 0.544 | 0.442 |
+| Exactitud balanceada | 0.479 | 0.878 | 0.486 | 0.882 |
+| Recall vaciado / llenado | 0.163 / 0.277 | 0.891 / 0.897 | 0.165 / 0.296 | 0.885 / 0.904 |
+| Precision vaciado / llenado | 0.568 / 0.548 | 0.087 / 0.130 | 0.564 / 0.559 | 0.103 / 0.126 |
+| PR-AUC vaciado / llenado | 0.194 / 0.312 | 0.384 / 0.535 | 0.222 / 0.324 | 0.427 / 0.545 |
+
+La prevalencia de cada clase de riesgo es de 1.5 % (seccion 2.3): es el valor de PR-AUC de un
+modelo que no distingue nada.
+
+**P3 - Grupos de estaciones**
+
+| Metrica | Baseline | Candidato (k = 3) |
+|---|---|---|
+| Silhouette, entrenamiento / validacion / prueba | -0.052 / -0.078 / -0.086 | **0.130** / 0.065 / 0.077 |
+| Davies-Bouldin, entrenamiento / validacion / prueba | 7.30 / 7.69 / 9.08 | 2.10 / 2.96 / 3.00 |
+| Calinski-Harabasz, entrenamiento / validacion / prueba | 5.8 / 2.2 / 2.5 | 45.1 / 9.4 / 15.5 |
+| Estabilidad (ARI), validacion / prueba | 0.635 / 0.659 | 0.754 / 0.619 |
+
+Silhouette de entrenamiento por k: 0.130 (k = 3), 0.070, 0.065, 0.061, 0.055 y 0.044 (k = 8).
 
 - **Parametros en cada run:** semilla; parametros de features (`features.mes_inicio`,
   `features.mes_fin`, cortes de entrenamiento y validacion, filtros de duracion, horizonte,
@@ -402,7 +451,7 @@ aparte sin duplicar el registro.
 
 Los runs se ejecutan desde el codigo del repositorio:
 
-```powershell
+```bash
 python -m tc5061_proyecto_equipo18.modeling.train --todos          # los 6 runs (o: make train)
 python -m tc5061_proyecto_equipo18.modeling.train --pregunta P2 --modelo candidato
 # un run como MLflow Project:
@@ -410,9 +459,40 @@ mlflow run . -P pregunta=P1 -P tipo_modelo=candidato --env-manager local --exper
 mlflow ui --backend-store-uri sqlite:///mlflow.db                  # o: make mlflow-ui
 ```
 
-**Lectura de resultados:** PENDIENTE (2-3 lineas por pregunta: el candidato supera al
-baseline en validacion? que horas, estaciones o clases fallan mas? que grupos aparecen
-y donde se ubican?).
+### Lectura de resultados
+
+- **P1: el candidato supera al baseline en todas las metricas.** En validacion baja el MAE de
+  0.95 a 0.75 viajes por hora (-21 %) y el WAPE de 0.79 a 0.63, y la mejora se mantiene en
+  prueba. El error se concentra en las horas pico: el MAE del candidato llega a 1.14 a las
+  8:00 y a 1.36 a las 18:00, contra menos de 0.3 en la madrugada. Un WAPE cercano a 0.6 refleja
+  que los conteos por estacion y hora son pequenos y muy variables. La devianza Poisson del
+  baseline (6.8) no se debe comparar directamente: se dispara cada vez que el rezago predice 0
+  en una hora que si tuvo viajes.
+- **P2: con la metrica de eleccion gana el baseline.** El F1 macro de validacion es 0.537 para
+  el baseline y 0.434 para el candidato. El candidato detecta cerca del 89 % de los riesgos,
+  pero solo entre el 9 y el 13 % de sus alertas son correctas: en validacion predice riesgo en
+  12 a 18 % de los bloques de las 6:00, 15:00 y 18:00, cuando el riesgo real es de 2 a 3 %. Su
+  PR-AUC es entre 1.7 y 2 veces la del baseline, es decir, ordena mejor las estaciones por
+  riesgo; lo que
+  falla es la regla de decision (pesos balanceados y clase mas probable). Por ahora el
+  baseline queda como referencia de P2, y el candidato pasa a la siguiente iteracion con un
+  umbral por clase elegido en validacion (seccion 8).
+- **P3: K-means forma grupos con sentido, pero la estructura es debil.** Con k = 3 la
+  silhouette es 0.13 en entrenamiento (la de los cuartiles es negativa) y baja a 0.06-0.08 en
+  periodos posteriores. Los grupos, con el perfil de dias laborales de entrenamiento:
+  - **Grupo 0, destino laboral (159 estaciones, 71 viajes por dia):** pico de llegadas a las
+    8:00 y de salidas a las 18:00; concentrado en el centro de Guadalajara y en Zapopan.
+  - **Grupo 1, origen residencial (185 estaciones, 63 viajes por dia):** el patron inverso,
+    salidas en la manana y llegadas en la tarde; incluye casi todas las estaciones de
+    Tlaquepaque (13 de 15).
+  - **Grupo 2, uso recreativo (26 estaciones, 40 viajes por dia):** mas viajes diarios en fin
+    de semana que en dias laborales (relacion 1.16) y mas salidas que llegadas; 10 de sus 26
+    estaciones estan en Zapopan, casi el doble de su peso en la red (74 de 370).
+
+  La estabilidad mejora en validacion (ARI 0.75 frente a 0.64 del baseline) pero en prueba
+  queda por debajo (0.62 frente a 0.66), en el mismo periodo en que crece la red. El ARI solo
+  usa las estaciones presentes en ambos periodos, asi que la caida viene de estaciones que
+  cambian de perfil; no puede deberse a las 90 que no tenian perfil en entrenamiento.
 
 ---
 
@@ -423,12 +503,35 @@ Capturas de la interfaz de MLflow, guardadas en `reports/figures/mlflow/`:
 | Evidencia | Archivo |
 |---|---|
 | Lista de runs del experimento | `reports/figures/mlflow/01_lista_runs.png` |
-| Detalle de un run: parametros, metricas y etiquetas | `reports/figures/mlflow/02_detalle_run.png` |
-| Artefacto registrado (p. ej. mapa de grupos de P3) | `reports/figures/mlflow/03_artefacto.png` |
+| Detalle de un run: parametros, metricas y etiquetas | `reports/figures/mlflow/02_detalle_run-1.png` y `02_detalle_run-2.png` |
+| Artefacto registrado (mapa de grupos de P3) | `reports/figures/mlflow/03_artefacto.png` |
 | Comparacion de dos o mas runs | `reports/figures/mlflow/04_comparacion_runs.png` |
 
-PENDIENTE: insertar aqui las cuatro imagenes una vez tomadas, por ejemplo
-`![Lista de runs](figures/mlflow/01_lista_runs.png)`.
+**Lista de runs.** Los 6 runs del experimento `mibici-equipo18`, con su duracion, el modelo
+registrado de cada candidato y las etiquetas `data_version`, `git_commit` y `git_sucio`.
+
+![Lista de runs](figures/mlflow/01_lista_runs.png)
+
+**Detalle de un run** (`p2-candidato-hgb_balanceado`). Metricas con prefijo de conjunto,
+etiquetas (`equipo`, `pregunta`, `rol`, `modelo`, `data_version`, `git_commit`, `git_sucio`) y
+fuente (`train.py`, rama `main`, commit `94871ea`).
+
+![Detalle de un run: metricas y etiquetas](figures/mlflow/02_detalle_run-1.png)
+
+Parametros de reproduccion (semilla, rango de fechas, cortes de particion, filtros,
+hiperparametros) y el modelo registrado.
+
+![Detalle de un run: parametros y modelo](figures/mlflow/02_detalle_run-2.png)
+
+**Artefacto registrado** (`p3-candidato-kmeans_pca`). Mapa de los tres grupos; el run tambien
+guarda los perfiles horarios, la silhouette por k, el mapa interactivo y las tablas.
+
+![Artefacto: mapa de grupos de P3](figures/mlflow/03_artefacto.png)
+
+**Comparacion de runs** (baseline y candidato de P1). Metricas de prueba y validacion lado a
+lado.
+
+![Comparacion de runs de P1](figures/mlflow/04_comparacion_runs.png)
 
 ---
 
@@ -436,14 +539,22 @@ PENDIENTE: insertar aqui las cuatro imagenes una vez tomadas, por ejemplo
 
 - **Catalogo de estaciones de un solo corte:** sin historico de capacidad ni de altas y
   bajas; los viajes de estaciones que ya no aparecen en la nomenclatura se descartan.
-- **Estaciones nuevas en validacion y prueba:** casi 100 estaciones aparecen entre junio y
-  septiembre de 2026; P1 y P2 las incluyen cuando ya tienen historia suficiente, y para
-  estaciones sin historia se puede usar su grupo de P3 como referencia.
+- **Estaciones adicionales en validacion y prueba:** cerca de 100 estaciones mas registran
+  viajes entre junio y septiembre de 2026; P1 y P2 las incluyen cuando ya tienen historia
+  suficiente, y para estaciones sin historia se puede usar su grupo de P3 como referencia. Las
+  metricas de prueba no se separan todavia entre estaciones vistas en entrenamiento y las demas.
 - **Etiqueta de P2 aproximada:** sin inventario real; si MiBici publica disponibilidad en
   tiempo real, se usara para validar la aproximacion y ajustar el umbral.
-- **Regla de decision de P2:** el candidato elige la clase mas probable; elegir un umbral por
-  clase segun el costo de una alerta falsa frente a un riesgo no detectado puede mejorar el
-  recall de las clases de riesgo.
+- **Seleccion de estaciones con el catalogo final:** solo se modelan las 470 estaciones
+  vigentes en sep-2026, asi que las metricas no dicen nada de estaciones que se retiran.
+- **Regla de decision de P2:** con pesos balanceados, elegir la clase mas probable produce
+  demasiadas alertas (precision de 9 a 13 %). El siguiente paso es elegir en validacion un
+  umbral por clase segun el costo de una alerta falsa frente a un riesgo no detectado, y
+  calibrar las probabilidades; la PR-AUC del candidato indica que hay margen para mejorar la
+  precision sin perder todo el recall.
+- **Numero de grupos de P3:** la silhouette baja de forma monotona de k = 3 a k = 8 y k = 2 no
+  se probo, asi que el k elegido esta en el borde del rango; la estructura de grupos es debil
+  (silhouette de 0.13 en entrenamiento).
 - **Eventos y clima:** faltan variables de lluvia y eventos masivos (p. ej. partidos del
   Mundial en junio de 2026).
 - **Seguimiento compartido:** cada integrante tiene su propio `mlflow.db`; para las
@@ -457,8 +568,9 @@ PENDIENTE: insertar aqui las cuatro imagenes una vez tomadas, por ejemplo
 - Lauchande, N. (2021). *Machine Learning Engineering with MLflow*. Packt. Cap. 5.
 - Thompson, S. (2023). *Managing Machine Learning Projects*. Manning. Sec. 7.4.
 - Wilson, B. (2022). *Machine Learning Engineering in Action*. Manning. Cap. 6.
-- Dorard, L. *Machine Learning Canvas*. <https://www.ownml.co/machine-learning-canvas>
-- MLflow. *MLflow Tracking* y *MLflow Projects*. <https://mlflow.org/docs/latest/ml/>
-- scikit-learn. *Metrics and scoring: quantifying the quality of predictions*.
+- Dorard, L. (s.f.). *Machine Learning Canvas*. <https://www.ownml.co/machine-learning-canvas>
+- MLflow. (s.f.). *MLflow Tracking* y *MLflow Projects*. <https://mlflow.org/docs/latest/ml/>
+- scikit-learn. (s.f.). *Metrics and scoring: quantifying the quality of predictions*.
   <https://scikit-learn.org/stable/modules/model_evaluation.html>
-- MiBici. *Datos abiertos*. <https://mibici.net/es/datos-abiertos/>
+- MiBici. (s.f.). *Datos abiertos*. Recuperado el 14 de octubre de 2026 de
+  <https://mibici.net/es/datos-abiertos/>
