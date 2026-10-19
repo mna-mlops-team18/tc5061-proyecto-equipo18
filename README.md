@@ -42,7 +42,9 @@ alcanza el 50 % de la capacidad de la estacion, suponiendo que arranca a media c
   registros y el hash SHA-256 del archivo crudo y del contenido limpio. La version de los datos
   (`data_version`) es un hash de esos hashes y es el valor que se registra en MLflow. Los datos
   no se suben a Git; el manifiesto si.
-- **Tamano real:** ver `reports/resumen_datos.md` (se regenera con el comando `resumen`).
+- **Tamano real:** 24 meses, 9,043,167 viajes y 484 estaciones (470 activas), version de datos
+  `06b0010a4627`; el detalle por mes esta en `reports/resumen_datos.md` (se regenera con el
+  comando `resumen`).
 
 ## Estructura del repositorio
 
@@ -51,7 +53,9 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 ```
 |-- .github/                      <- Plantilla de Pull Request
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
-|-- Makefile                      <- Atajos: make data, make verify, make features, make test
+|-- Makefile                      <- Atajos: make data, make verify, make features, make train, make test
+|-- MLproject                     <- MLflow Project: un run del experimento con `mlflow run`
+|-- python_env.yaml               <- Ambiente del MLflow Project
 |-- README.md
 |-- pyproject.toml                <- Metadatos del paquete y configuracion de pytest y ruff
 |-- requirements.txt              <- Dependencias con version fija (==)
@@ -64,10 +68,10 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |-- docs/                         <- Proyecto mkdocs por defecto de la plantilla
 |-- models/                       <- Modelos entrenados (ignorado por Git)
 |-- notebooks/                    <- Solo exploracion, p. ej. 1.0-ja-exploracion-viajes.ipynb
-|-- references/                   <- manifiesto_datos.json, ML Canvas y diagrama de arquitectura
-|-- reports/
-|   +-- figures/                  <- Figuras generadas
-|-- tests/                        <- Pruebas de ingesta y de fuga de informacion
+|-- references/                   <- manifiesto_datos.json, ML Canvas y arquitectura (md, png, html)
+|-- reports/                      <- propuesta_entrega1.md (Parte A) y resumen_datos.md
+|   +-- figures/                  <- Figuras generadas y capturas de MLflow
+|-- tests/                        <- Pruebas de ingesta, de fuga de informacion y de P1, P2 y P3
 |
 +-- tc5061_proyecto_equipo18/     <- Codigo fuente
     |-- config.py                 <- Unico lugar de rutas, fechas, semillas y parametros
@@ -75,8 +79,12 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
     |-- features.py               <- Variables de P1, P2 y P3 sin fuga de informacion
     |-- plots.py                  <- Figuras y mapas
     +-- modeling/
-        |-- train.py              <- Entrenamiento y registro en MLflow
-        +-- predict.py            <- Inferencia con modelos entrenados
+        |-- comun.py              <- Registro comun en MLflow: run, etiquetas, parametros, metricas, modelo
+        |-- p1_regresion.py       <- P1: rezago semanal vs. HistGradientBoosting Poisson
+        |-- p2_clasificacion.py   <- P2: frecuencia del bloque vs. HistGradientBoosting balanceado
+        |-- p3_clustering.py      <- P3: cuartiles de volumen vs. K-means sobre PCA
+        |-- train.py              <- Orquesta el experimento base (--todos, --pregunta, --modelo)
+        +-- predict.py            <- Plantilla de inferencia (siguientes entregas)
 ```
 
 ## Instalacion
@@ -94,6 +102,23 @@ make requirements          # instala requirements.txt (versiones fijas) y el paq
 
 cp .env.example .env       # opcional: solo para cambiar la URI de MLflow o usar un espejo
 ```
+
+En Windows (PowerShell), donde normalmente no hay `make`:
+
+```powershell
+git clone https://github.com/mna-mlops-team18/tc5061-proyecto-equipo18.git
+cd tc5061-proyecto-equipo18
+
+py -3.14 -m venv .venv
+.venv\Scripts\activate     # si lo bloquea: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+Copy-Item .env.example .env   # opcional
+```
+
+Sin `make`, cada atajo equivale al comando que aparece en su comentario (por ejemplo,
+`make data` es `python -m tc5061_proyecto_equipo18.dataset ingest`).
 
 Para abrir los notebooks usa un editor con soporte de Jupyter (por ejemplo VS Code) y
 selecciona el kernel del ambiente `.venv`; `ipykernel` ya viene instalado.
@@ -125,9 +150,42 @@ make test       # pytest
 
 ## Experimento base en MLflow
 
-_Pendiente: esta seccion se completa en el Pull Request de `modeling/train.py`, con los
-comandos para correr los baselines, el nombre del experimento (`mibici-equipo18`) y como abrir
-la interfaz (`make mlflow-ui`)._
+Un experimento, `mibici-equipo18`, con un baseline y un candidato por pregunta (6 runs). Se
+corre desde el codigo del repositorio, despues de la ingesta y de `make features`:
+
+```bash
+make train      # python -m tc5061_proyecto_equipo18.modeling.train --todos
+python -m tc5061_proyecto_equipo18.modeling.train --pregunta P2 --modelo candidato   # un solo run
+make mlflow-ui  # mlflow ui --backend-store-uri sqlite:///mlflow.db  ->  http://localhost:5000
+```
+
+Tambien como MLflow Project (un run por comando, desde la raiz del repo):
+
+```bash
+mlflow run . -P pregunta=P1 -P tipo_modelo=candidato --env-manager local --experiment-name mibici-equipo18
+```
+
+| Pregunta | Baseline (run) | Candidato (run) | Metricas |
+|---|---|---|---|
+| P1 | `p1-baseline-rezago_semanal`: salidas de la misma hora hace 7 dias | `p1-candidato-hgb_poisson`: HistGradientBoosting con perdida Poisson | `mae`, `rmse`, `wape`, `devianza_poisson`, `r2` |
+| P2 | `p2-baseline-frecuencia_mismo_bloque`: clase mas frecuente del bloque en 7 dias | `p2-candidato-hgb_balanceado`: HistGradientBoosting con pesos balanceados | `f1_macro`, `balanced_accuracy`, `recall_*`, `precision_*`, `pr_auc_*` |
+| P3 | `p3-baseline-cuartiles_volumen`: cuartiles del volumen diario | `p3-candidato-kmeans_pca`: K-means sobre PCA, k por silhouette | `silhouette`, `davies_bouldin`, `calinski_harabasz`, `estabilidad_ari` |
+
+Cada run registra (ver `modeling/comun.py`):
+
+- **Parametros:** semilla, parametros de features (rango de fechas, cortes de la particion,
+  filtros, horizonte, rezagos, bloque y umbral de riesgo), `data_version`, `modelo` y sus
+  hiperparametros.
+- **Metricas** con el conjunto en el nombre: `entrenamiento_*`, `validacion_*`, `prueba_*`.
+- **Etiquetas:** `equipo`, `pregunta`, `rol` (baseline o candidato), `modelo`, `data_version`,
+  `git_commit` y `git_sucio`.
+- **Artefactos:** figuras de diagnostico, `features_meta.json`, el manifiesto de datos y, en
+  los candidatos, el modelo en formato MLflow (skops). P3 agrega el mapa interactivo de grupos
+  y las tablas de resumen y asignaciones.
+
+Para que el `git_commit` de cada run sea fiel, corre el experimento sin cambios pendientes en
+archivos versionados (`git_sucio = false`). La propuesta completa y la lectura de resultados
+estan en `reports/propuesta_entrega1.md`.
 
 ## Flujo de trabajo con Git y GitHub
 
@@ -158,11 +216,34 @@ forma `tipo(alcance): descripcion en imperativo`, por ejemplo
 Nunca se versionan datos de MiBici, modelos serializados, carpetas de MLflow (`mlruns/`,
 `mlartifacts/`, `mlflow.db`) ni credenciales (`.env`); el `.gitignore` los excluye.
 
+## Buenas practicas
+
+Practicas obligatorias de la entrega y como las aplica el repositorio:
+
+| Ambito | Practica | Como la aplicamos | Donde se verifica |
+|---|---|---|---|
+| MLflow | Un experimento por proyecto y runs con nombre descriptivo | Experimento `mibici-equipo18`; runs `p<n>-<rol>-<modelo>`, p. ej. `p1-baseline-rezago_semanal` | Interfaz de MLflow |
+| MLflow | Registrar lo necesario para reproducir el run | Parametros `features.mes_inicio`, `features.mes_fin`, `data_version`, `semilla`, `modelo` e hiperparametros | Parametros del run |
+| MLflow | Ligar cada run con su codigo y su pregunta | Etiquetas `git_commit`, `git_sucio`, `pregunta`, `rol`, `equipo` | Etiquetas del run |
+| MLflow | Metricas con el conjunto en el nombre | `validacion_mae`, `prueba_f1_macro`, `prueba_estabilidad_ari`... | Metricas del run |
+| MLflow | Sin credenciales ni datos personales | Usuario, genero y anio de nacimiento no se leen del CSV; la URI de MLflow va en `.env`; los artefactos solo tienen agregados por estacion | Interfaz de MLflow y codigo |
+| Estructura | Notebooks solo para exploracion, con la convencion de la plantilla | `notebooks/1.0-ja-exploracion-viajes.ipynb`; la logica vive en el modulo | Carpeta `notebooks/` |
+| Estructura | Configuracion en un solo lugar | Rutas, fechas, semillas, URL e hiperparametros solo en `config.py` | `config.py` |
+| Estructura | Dependencias fijas y entorno reproducible desde un clon limpio | `requirements.txt` con `==` y Python 3.14; instalacion documentada arriba | Archivo de dependencias y README |
+| Datos y Git | Ningun dato, modelo, carpeta de MLflow ni credencial en Git | `.gitignore` excluye `data/`, CSV, Parquet, `mlruns/`, `mlartifacts/`, `mlflow.db`, modelos y `.env` | `.gitignore` e historial |
+| Datos y Git | Todo cambio entra a `main` por Pull Request revisado | `main` protegida con 1 aprobacion minima; squash and merge | Pestana Pull Requests |
+
 ## Integrantes y roles
 
 | Integrante | GitHub | Rol |
 |---|---|---|
-| Alberto Labrada Soto | [@betolabrada](https://github.com/betolabrada) | _Por definir_ |
-| Jesus Alvizo | [@JesusAlvizo26](https://github.com/JesusAlvizo26) | _Por definir_ |
-| Lizeth Ruiz | [@LizethRuiz](https://github.com/LizethRuiz) | _Por definir_ |
-| Jessica Paola Ruiz | [@Jessicapaolarc](https://github.com/Jessicapaolarc) | _Por definir_ |
+| Alberto Labrada Soto | [@betolabrada](https://github.com/betolabrada) | Repositorio y flujo de trabajo, manifiesto de datos, README |
+| Jesus Alvizo | [@JesusAlvizo26](https://github.com/JesusAlvizo26) | Configuracion, ingesta reproducible, feature engineering y propuesta |
+| Lizeth Ruiz | [@LizethRuiz](https://github.com/LizethRuiz) | Base del experimento en MLflow, P1 (regresion) y P2 (clasificacion) |
+| Jessica Paola Ruiz | [@Jessicapaolarc](https://github.com/Jessicapaolarc) | P3 (clustering) |
+
+## Documentacion
+
+- [Propuesta de solucion, entrega 1](reports/propuesta_entrega1.md)
+- [ML Canvas](references/ml_canvas.md) - [Arquitectura](references/arquitectura.md)
+- [Resumen de los datos](reports/resumen_datos.md) - [Manifiesto de datos](references/manifiesto_datos.json)
