@@ -1,0 +1,122 @@
+"""Pruebas de P3: anti-fuga del baseline, estabilidad de grupos y runs completos en MLflow."""
+
+import mlflow
+import numpy as np
+import pandas as pd
+import pytest
+
+from tc5061_proyecto_equipo18 import config
+from tc5061_proyecto_equipo18.modeling import comun, p3_clustering, train
+
+META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
+PREFIJOS = ("sal_lab", "lle_lab", "sal_fds", "lle_fds")
+HORAS_PICO = {0: [7, 8, 9], 1: [17, 18, 19], 2: [12, 13, 14]}  # tres tipos de estacion
+
+
+@pytest.fixture
+def datos_p3() -> dict[str, pd.DataFrame]:
+    """Perfiles sinteticos de P3: 3 tipos de estacion (por hora pico) en los 3 periodos."""
+    rng = np.random.default_rng(config.SEMILLA)
+    filas = []
+    for periodo, n in (("entrenamiento", 90), ("validacion", 88), ("prueba", 86)):
+        for i in range(n):
+            tipo = i % 3
+            base = np.zeros(24)
+            base[HORAS_PICO[tipo]] = 1
+            fila = {
+                "estacion_id": i,
+                "codigo": f"GDL-{i:03d}",
+                "nombre": f"Estacion {i}",
+                "municipio": "GDL",
+                "capacidad": 20,
+                "latitud": 20.6 + 0.02 * tipo + rng.normal(0, 0.003),
+                "longitud": -103.3 + 0.02 * tipo + rng.normal(0, 0.003),
+                "periodo": periodo,
+                "viajes_periodo": 1000,
+                "log_viajes_dia": rng.normal(3 + tipo, 0.3),
+                "ratio_fin_semana": rng.uniform(0, 1),
+                "balance_neto": rng.normal(0, 0.1),
+            }
+            for prefijo in PREFIJOS:
+                perfil = base + rng.uniform(0, 0.2, 24)
+                perfil = perfil / perfil.sum()
+                fila.update({f"{prefijo}_h{h:02d}": perfil[h] for h in range(24)})
+            filas.append(fila)
+    return comun.separar_particiones(pd.DataFrame(filas), columna_tiempo=None)
+
+
+def test_variables_no_incluyen_ubicacion_ni_identificadores(datos_p3):
+    columnas = p3_clustering.columnas_variables(datos_p3["entrenamiento"])
+    assert len(columnas) == 4 * 24 + 3
+    for prohibida in ("latitud", "longitud", "estacion_id", "viajes_periodo", "capacidad"):
+        assert prohibida not in columnas
+
+
+def test_cortes_del_baseline_salen_solo_de_entrenamiento(datos_p3):
+    cortes = p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"])
+    assert len(cortes) == config.P3_GRUPOS_BASELINE - 1
+
+    # Una estacion de prueba con volumen enorme cae en el grupo mas alto y no mueve los cortes
+    extremo = datos_p3["prueba"].assign(log_viajes_dia=100.0)
+    grupos = p3_clustering.asignar_por_cortes(extremo, cortes)
+    assert (grupos == config.P3_GRUPOS_BASELINE - 1).all()
+    np.testing.assert_allclose(cortes, p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"]))
+
+
+def test_estabilidad_es_perfecta_si_los_perfiles_no_cambian(datos_p3):
+    perfiles = dict(datos_p3)
+    perfiles["validacion"] = perfiles["entrenamiento"].assign(periodo="validacion")
+    columnas = p3_clustering.columnas_variables(perfiles["entrenamiento"])
+    prep = p3_clustering.ajustar_preprocesamiento(perfiles["entrenamiento"], columnas)
+    cortes = p3_clustering.cortes_cuartiles(perfiles["entrenamiento"])
+    metricas, asignaciones, _ = p3_clustering.evaluar(
+        prep, columnas, perfiles, lambda df, z: p3_clustering.asignar_por_cortes(df, cortes)
+    )
+    assert metricas["validacion"]["estabilidad_ari"] == pytest.approx(1.0)
+    assert set(asignaciones["periodo"]) == {"entrenamiento", "validacion", "prueba"}
+
+
+def test_elegir_k_recupera_los_tipos_de_estacion(datos_p3):
+    columnas = p3_clustering.columnas_variables(datos_p3["entrenamiento"])
+    prep = p3_clustering.ajustar_preprocesamiento(datos_p3["entrenamiento"], columnas)
+    k, _, siluetas = p3_clustering.elegir_k(prep.transform(datos_p3["entrenamiento"][columnas]))
+    assert k == 3
+    assert set(siluetas) == set(config.P3_K_CANDIDATOS)
+
+
+def test_entrenar_registra_baseline_y_candidato(mlflow_temporal, datos_p3):
+    run_ids = p3_clustering.entrenar(datos=datos_p3, meta_features=META)
+    assert len(run_ids) == 2
+
+    baseline, candidato = (mlflow.get_run(run_id) for run_id in run_ids)
+    for run in (baseline, candidato):
+        assert run.data.params["data_version"] == "abc123def456"
+        assert run.data.tags["pregunta"] == "P3"
+        for periodo in ("entrenamiento", "validacion", "prueba"):
+            for metrica in ("silhouette", "davies_bouldin", "calinski_harabasz"):
+                assert f"{periodo}_{metrica}" in run.data.metrics
+        for periodo in ("validacion", "prueba"):
+            assert f"{periodo}_estabilidad_ari" in run.data.metrics
+    assert baseline.data.params["modelo"] == "cuartiles_volumen"
+    assert baseline.data.tags["rol"] == "baseline"
+    assert candidato.data.params["modelo"] == "kmeans_pca"
+    assert candidato.data.params["k"] == "3"  # tres tipos de estacion bien separados
+
+    cliente = mlflow.MlflowClient()
+    figuras = {a.path for a in cliente.list_artifacts(candidato.info.run_id, "figuras")}
+    for figura in ("mapa_grupos", "perfiles_grupo", "silhouette_por_k"):
+        assert any(figura in ruta for ruta in figuras)
+    tablas = {a.path for a in cliente.list_artifacts(candidato.info.run_id, "tablas")}
+    assert {"tablas/resumen_grupos.csv", "tablas/asignaciones.csv"} <= tablas
+    assert config.ruta_modelo(candidato.info.run_name).exists()
+    assert not config.ruta_modelo(baseline.info.run_name).exists()
+
+
+def test_train_invoca_p3_con_el_contrato_de_comun(mlflow_temporal, datos_p3, monkeypatch):
+    """train.py llama ``entrenar(roles)``; P3 debe leer sus datos y metadatos por su cuenta."""
+    monkeypatch.setattr(train, "configurar_mlflow", lambda: "0")
+    monkeypatch.setattr(p3_clustering, "cargar_dataset", lambda *args, **kwargs: datos_p3)
+    monkeypatch.setattr(comun, "cargar_metadatos_features", lambda: META)
+    runs = train.ejecutar(["P3"], ("baseline",))
+    assert len(runs["P3"]) == 1
+    assert mlflow.get_run(runs["P3"][0]).data.tags["rol"] == "baseline"
