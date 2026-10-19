@@ -224,5 +224,3 @@ mlflow.db-journal
 # Configuracion local de editores
 .vscode/
 .idea/
-
-reports/figures/experimento_base/
