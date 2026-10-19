@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>Arquitectura MiBici</title>
+<style>
+  :root { --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --line:#d9d8d2; --surface:#ffffff; --page:#f4f3ef;
+          --azul:#2a78d6; --azul-claro:#eef4fc; --naranja:#eb6834; --naranja-claro:#fdf1eb; --aqua:#1baf7a; --aqua-claro:#eaf7f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); font-family:"Segoe UI", system-ui, -apple-system, sans-serif; color:var(--ink); }
+  .lienzo { position:relative; width:1560px; padding:26px 30px 22px; }
+  h1 { font-size:24px; margin:0; }
+  .sub { color:var(--ink2); font-size:13.5px; margin:4px 0 18px; }
+  .fila { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:104px; margin-bottom:58px; }
+  .etapa { position:relative; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px 12px; }
+  .etapa .num { font-size:11.5px; font-weight:700; letter-spacing:.8px; color:var(--muted); text-transform:uppercase; }
+  .etapa h2 { font-size:16px; margin:2px 0 8px; }
+  .etapa ul { margin:0; padding-left:16px; }
+  .etapa li { font-size:12.8px; line-height:1.42; margin-bottom:3px; color:#1f1f1e; }
+  code { font-family:"Cascadia Mono", Consolas, monospace; font-size:12px; background:#f1f0ec; padding:0 4px; border-radius:4px; }
+  .chips { margin-top:9px; display:flex; flex-wrap:wrap; gap:5px; }
+  .chip { font-size:11.2px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); color:var(--ink2); background:#faf9f6; }
+  .fuente { border-color:#86b6ef; background:var(--azul-claro); }
+  .version { border-color:#ec835a; }
+  .registro { border-color:var(--aqua); }
+  .destacado { margin-top:8px; padding:7px 9px; border-radius:8px; font-size:12.3px; line-height:1.4; }
+  .destacado.naranja { background:var(--naranja-claro); }
+  .destacado.aqua { background:var(--aqua-claro); }
+  .banda { background:var(--surface); border:1px dashed #b9b8b0; border-radius:12px; padding:12px 16px; display:grid; grid-template-columns: 200px 1fr; gap:16px; align-items:center; }
+  .banda h2 { font-size:15px; margin:0; }
+  .banda ul { margin:0; padding:0; list-style:none; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px 22px; }
+  .banda li { font-size:12.6px; line-height:1.4; }
+  svg.flechas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+  .etiqueta { font-size:11px; fill:var(--ink2); }
+  footer { margin-top:10px; font-size:11px; color:var(--muted); }
+</style></head>
+<body><div class="lienzo" id="lienzo">
+<h1>Arquitectura del proyecto MiBici - equipo 18</h1>
+<div class="sub">De los CSV del portal al registro de experimentos. Cada paso es un comando del repositorio; los datos no entran a Git, su version si.</div>
+
+<div class="fila">
+  <section class="etapa fuente" id="e1"><div class="num">1 - Fuente</div><h2>Portal de datos abiertos MiBici</h2>
+    <ul><li>24 CSV mensuales de viajes (oct-2024 a sep-2026): 9.04 millones de viajes</li>
+    <li>Nomenclatura 2026-09: coordenadas y capacidad de 484 estaciones (470 activas)</li>
+    <li>Formatos variables entre anios (codificacion, comillas, fechas)</li></ul>
+    <div class="chips"><span class="chip">HTTPS</span><span class="chip">CSV</span></div></section>
+  <section class="etapa" id="e2"><div class="num">2 - Ingesta y versionado</div><h2><code>dataset.py ingest</code> - <code>verify</code></h2>
+    <ul><li>Descarga sin pasos manuales, con reintentos</li>
+    <li>Detecta codificacion, delimitador y formato de fecha por archivo</li>
+    <li>Normaliza columnas; descarta usuario, genero y anio de nacimiento</li>
+    <li><code>verify</code> recalcula hashes y los compara con el manifiesto</li></ul>
+    <div class="chips"><span class="chip">requests</span><span class="chip">pandas</span><span class="chip">hashlib</span><span class="chip">typer</span></div></section>
+  <section class="etapa version" id="e3"><div class="num">3 - Almacenamiento</div><h2>Datos locales + manifiesto en Git</h2>
+    <ul><li><code>data/raw/</code> CSV originales</li>
+    <li><code>data/processed/</code> un Parquet (zstd) por mes + estaciones</li>
+    <li><code>data/</code> esta en <code>.gitignore</code></li></ul>
+    <div class="destacado naranja"><b><code>references/manifiesto_datos.json</code></b> - registros y SHA-256 de cada archivo -> <b>data_version</b>, versionado en Git</div>
+    <div class="chips"><span class="chip">Parquet</span><span class="chip">pyarrow</span><span class="chip">Git</span></div></section>
+</div>
+
+<div class="fila">
+  <section class="etapa" id="e4"><div class="num">4 - Procesamiento</div><h2><code>features.py</code></h2>
+    <ul><li>Filtros de limpieza (duracion 1 min-4 h, estaciones conocidas)</li>
+    <li>Malla estacion-hora con ceros; bloques de 3 h para P2</li>
+    <li>Calendario y festivos; rezagos y medias solo con el pasado</li>
+    <li>Salida: conjuntos P1 - P2 - P3 + <code>features_meta.json</code></li></ul>
+    <div class="chips"><span class="chip">pandas</span><span class="chip">numpy</span><span class="chip">pytest (sin fuga)</span></div></section>
+  <section class="etapa registro" id="e5"><div class="num">5 - Entrenamiento y registro</div><h2><code>modeling/</code> + MLflow</h2>
+    <ul><li><code>comun.py</code> + un modulo por pregunta (P1 regresion, P2 clasificacion, P3 clustering)</li>
+    <li>Baseline y candidato; <code>train.py</code> o <code>mlflow run</code> (MLproject)</li></ul>
+    <div class="destacado aqua"><b>MLflow Tracking</b> - <code>mlflow.db</code> + <code>mlruns/</code>: parametros (fechas, data_version, semilla, hiperparametros), metricas <code>entrenamiento_/validacion_/prueba_</code>, etiquetas (equipo, pregunta, rol, git_commit), artefactos y modelo</div>
+    <div class="chips"><span class="chip">scikit-learn</span><span class="chip">MLflow Tracking</span><span class="chip">MLflow Projects</span></div></section>
+  <section class="etapa" id="e6"><div class="num">6 - Consulta y evidencia</div><h2>MLflow UI y reportes</h2>
+    <ul><li>Lista y comparacion de runs, artefactos (graficas, mapas, tablas)</li>
+    <li>Capturas en <code>reports/figures/</code> y propuesta en <code>reports/</code></li>
+    <li>Siguientes entregas: Model Registry y servicio en contenedores</li></ul>
+    <div class="chips"><span class="chip">mlflow ui</span><span class="chip">matplotlib</span><span class="chip">Leaflet</span></div></section>
+</div>
+
+<div class="banda" id="banda"><h2>Codigo y colaboracion</h2>
+  <ul><li><b>GitHub Flow:</b> <code>main</code> protegida; todo entra por Pull Request revisado</li>
+  <li><b>Cookiecutter Data Science:</b> estructura estandar de carpetas</li>
+  <li><b>Conventional Commits</b> y ramas <code>tipo/descripcion</code></li>
+  <li><b><code>config.py</code>:</b> rutas, fechas, semillas y parametros en un solo lugar</li>
+  <li><b><code>requirements.txt</code>:</b> versiones fijas - Python 3.14</li>
+  <li><b><code>git_commit</code></b> de cada run enlaza resultados y codigo</li></ul></div>
+<footer>Herramientas elegidas por ser ligeras y reproducibles en una laptop (ver la justificacion en references/arquitectura.md).</footer>
+
+<svg class="flechas" id="flechas"><defs><marker id="punta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#898781"/></marker></defs></svg>
+</div>
+<script>
+const lienzo = document.getElementById('lienzo').getBoundingClientRect();
+const svg = document.getElementById('flechas');
+const caja = id => { const r = document.getElementById(id).getBoundingClientRect();
+  return {x:r.left-lienzo.left, y:r.top-lienzo.top, w:r.width, h:r.height}; };
+function flecha(d, texto, tx, ty) {
+  const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+  p.setAttribute('d', d); p.setAttribute('fill','none'); p.setAttribute('stroke','#898781');
+  p.setAttribute('stroke-width','1.6'); p.setAttribute('marker-end','url(#punta)'); svg.appendChild(p);
+  if (texto) { const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x', tx); t.setAttribute('y', ty); t.setAttribute('class','etiqueta'); t.setAttribute('text-anchor','middle');
+    t.textContent = texto; svg.appendChild(t); }
+}
+const h = (a, b, texto) => { const A = caja(a), B = caja(b); const y = A.y + Math.min(A.h, B.h)/2;
+  flecha(`M${A.x+A.w+4},${y} L${B.x-6},${y}`, texto, (A.x+A.w+B.x)/2, y-8); };
+h('e1','e2','HTTPS'); h('e2','e3','Parquet + hashes'); h('e4','e5','P1 - P2 - P3'); h('e5','e6','runs');
+const A = caja('e3'), B = caja('e4'); const yMedio = A.y + A.h + 29;
+flecha(`M${A.x+A.w/2},${A.y+A.h+4} L${A.x+A.w/2},${yMedio} L${B.x+B.w/2},${yMedio} L${B.x+B.w/2},${B.y-6}`,
+       'datos limpios + data_version', (A.x+A.w/2+B.x+B.w/2)/2, yMedio-7);
+</script>
+</body></html>
