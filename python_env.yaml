@@ -1,0 +1,7 @@
+# Ambiente del MLflow Project (se usa cuando `mlflow run` crea su propio ambiente,
+# es decir, sin --env-manager local).
+python: "3.14"
+build_dependencies:
+  - pip
+dependencies:
+  - -r requirements.txt

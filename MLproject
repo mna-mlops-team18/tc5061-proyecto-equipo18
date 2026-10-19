@@ -1,0 +1,23 @@
+# MLflow Project del equipo 18: un run del experimento base con un solo comando.
+# Requisitos previos (una vez): ingesta y features (ver README).
+#
+#   mlflow run . -P pregunta=P1 -P tipo_modelo=candidato --env-manager local --experiment-name mibici-equipo18
+#
+# - pregunta: P1, P2 o P3. tipo_modelo: baseline o candidato (un proyecto = un run).
+# - --env-manager local usa el ambiente ya activado (recomendado en Windows); sin esa opcion
+#   MLflow crea un ambiente nuevo a partir de python_env.yaml.
+# - --experiment-name debe ser el del proyecto (config.MLFLOW_EXPERIMENTO); si no, MLflow
+#   rechaza el run porque el experimento activo no coincide.
+# - Correrlo desde la raiz del repositorio, para que use el mismo mlflow.db que train.py.
+# - El parametro se llama tipo_modelo (no modelo) porque cada run ya registra un parametro
+#   "modelo" con el nombre del algoritmo, y MLflow no permite dos valores para el mismo parametro.
+name: mibici-equipo18
+
+python_env: python_env.yaml
+
+entry_points:
+  main:
+    parameters:
+      pregunta: {type: string, default: P1}
+      tipo_modelo: {type: string, default: candidato}
+    command: "python -m tc5061_proyecto_equipo18.modeling.train --pregunta {pregunta} --modelo {tipo_modelo}"
