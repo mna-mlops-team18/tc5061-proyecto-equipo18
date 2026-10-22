@@ -11,6 +11,8 @@ from tc5061_proyecto_equipo18.features import COLUMNAS_P2, OBJETIVO_P2
 from tc5061_proyecto_equipo18.modeling import comun, p2_clasificacion
 
 META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
+# Candidato de la entrega 1; los demas candidatos del catalogo se implementan despues
+CANDIDATOS = ["hgb_balanceado"]
 
 
 @pytest.fixture
@@ -40,6 +42,10 @@ def datos_p2():
         ) * (1 - df["frac_vaciado_mismo_bloque_7d"])
         filas.append(df)
     return comun.separar_particiones(pd.concat(filas, ignore_index=True), "bloque_inicio")
+
+
+def artefactos(run_id: str, carpeta: str) -> set[str]:
+    return {a.path for a in mlflow.MlflowClient().list_artifacts(run_id, carpeta)}
 
 
 def test_metricas_clasificacion_perfectas():
@@ -78,23 +84,35 @@ def test_probabilidades_modelo_rellena_clases_ausentes():
     assert (probabilidades[:, 1] == 0).all()
 
 
-def test_entrenar_registra_baseline_y_candidato(mlflow_temporal, datos_p2):
-    run_ids = p2_clasificacion.entrenar(datos=datos_p2, meta_features=META)
-    assert len(run_ids) == 2
+@pytest.mark.parametrize("modelo", CANDIDATOS)
+def test_cada_candidato_del_catalogo_se_puede_construir(modelo):
+    hiperparametros = comun.resolver_hiperparametros("P2", modelo)
+    assert hasattr(p2_clasificacion.construir_estimador(modelo, hiperparametros), "fit")
 
-    baseline, candidato = (mlflow.get_run(run_id) for run_id in run_ids)
-    for run in (baseline, candidato):
-        assert run.data.params["data_version"] == "abc123def456"
-        for particion in ("validacion", "prueba"):
-            for metrica in ("f1_macro", "recall_vaciado", "precision_llenado", "pr_auc_vaciado"):
-                assert f"{particion}_{metrica}" in run.data.metrics
-    assert baseline.data.params["modelo"] == "frecuencia_mismo_bloque"
-    assert candidato.data.params["class_weight"] == "balanced"
 
-    artefactos = {
-        a.path for a in mlflow.MlflowClient().list_artifacts(candidato.info.run_id, "figuras")
-    }
+def test_baseline_registra_metricas_sin_modelo(mlflow_temporal, datos_p2):
+    run_id = p2_clasificacion.correr("frecuencia_mismo_bloque", datos=datos_p2, meta_features=META)
+    run = mlflow.get_run(run_id)
+    assert run.data.tags["etapa"] == "baseline"
+    for particion in ("validacion", "prueba"):
+        for metrica in ("f1_macro", "recall_vaciado", "precision_llenado", "pr_auc_vaciado"):
+            assert f"{particion}_{metrica}" in run.data.metrics
+    assert not run.outputs.model_outputs
+
+
+@pytest.mark.parametrize("modelo", CANDIDATOS)
+def test_candidato_registra_modelo_figuras_y_conjuntos(mlflow_temporal, datos_p2, modelo):
+    run_id = p2_clasificacion.correr(modelo, datos=datos_p2, meta_features=META)
+    run = mlflow.get_run(run_id)
+    assert run.data.tags["etapa"] == "candidato" and run.data.params["modelo"] == modelo
+    assert 0 <= run.data.metrics["validacion_f1_macro"] <= 1
+    assert run.data.metrics["costo_entrenamiento_seg"] >= 0
+    figuras = artefactos(run_id, "figuras")
     for figura in ("matriz_confusion", "curvas_pr", "riesgo_por_bloque", "importancias"):
-        assert any(figura in ruta for ruta in artefactos)
-    assert config.ruta_modelo(candidato.info.run_name).exists()
-    assert not config.ruta_modelo(baseline.info.run_name).exists()
+        assert f"figuras/{figura}.png" in figuras
+    assert len(run.inputs.dataset_inputs) == 3
+
+    (salida,) = run.outputs.model_outputs
+    cargado = mlflow.pyfunc.load_model(f"models:/{salida.model_id}")
+    predicho = np.asarray(cargado.predict(datos_p2["prueba"][COLUMNAS_P2]))
+    assert set(np.unique(predicho)) <= {0, 1, 2}

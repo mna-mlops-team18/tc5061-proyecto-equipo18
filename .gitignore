@@ -202,11 +202,13 @@ datos_abiertos_*.csv
 nomenclatura_*.csv
 *.parquet
 
-# Carpetas y base de datos que genera MLflow
+# Carpetas y base de datos que genera MLflow (servidor local de tracking y Model Registry)
 mlruns/
 mlartifacts/
 mlflow.db
 mlflow.db-journal
+mlflow.db-wal
+mlflow.db-shm
 
 # Modelos serializados (MLflow ya guarda el modelo de cada run)
 /models/*
@@ -225,4 +227,5 @@ mlflow.db-journal
 .vscode/
 .idea/
 
+# Figuras locales del experimento base de la entrega 1 (ahora solo viven en MLflow)
 reports/figures/experimento_base/

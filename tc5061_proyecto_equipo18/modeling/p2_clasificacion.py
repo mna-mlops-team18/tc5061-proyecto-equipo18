@@ -1,26 +1,24 @@
 """P2 - Clasificacion: una estacion se quedara sin bicicletas o sin anclajes en el siguiente bloque.
 
-Clases (``config.P2_CLASES``): 0 sin riesgo, 1 riesgo de vaciado, 2 riesgo de llenado. Dos runs
-en MLflow, evaluados con las mismas metricas y particiones:
+Clases (``config.P2_CLASES``): 0 sin riesgo, 1 riesgo de vaciado, 2 riesgo de llenado. Modelos
+del catalogo ``config.P2_MODELOS``, todos evaluados con las mismas metricas y particiones que
+en la entrega 1:
 
-- ``baseline`` (``frecuencia_mismo_bloque``): la probabilidad de cada clase es la fraccion de
-  los ultimos 7 dias en que ese mismo bloque estuvo en esa clase; predice la mas probable.
-  Es la regla que el equipo de rebalanceo aplicaria con su experiencia ("esta estacion
-  suele vaciarse a esta hora").
-- ``candidato`` (``hgb_balanceado``): ``HistGradientBoostingClassifier`` con pesos de clase
-  balanceados (las clases de riesgo son minoritarias) sobre ``features.COLUMNAS_P2``.
-
-Ambos se evaluan en validacion (para comparar y elegir) y en prueba (estimacion final).
+- ``frecuencia_mismo_bloque`` (baseline): la probabilidad de cada clase es la fraccion de los
+  ultimos 7 dias en que ese mismo bloque estuvo en esa clase; predice la mas probable. Es la
+  regla que el equipo de rebalanceo aplicaria con su experiencia ("esta estacion suele
+  vaciarse a esta hora").
+- ``hgb_balanceado``: ``HistGradientBoostingClassifier`` con pesos de clase balanceados (el
+  candidato de la entrega 1).
 
 Uso::
 
-    python -m tc5061_proyecto_equipo18.modeling.train --pregunta P2
+    mlflow run . -e train -P pregunta=p2 -P modelo=hgb_balanceado --env-manager local
 """
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     average_precision_score,
     balanced_accuracy_score,
@@ -30,19 +28,23 @@ from sklearn.metrics import (
 )
 
 from tc5061_proyecto_equipo18 import config
-from tc5061_proyecto_equipo18.features import COLUMNAS_P2, OBJETIVO_P2
+from tc5061_proyecto_equipo18.features import COLUMNAS_P2, OBJETIVO_P2, cargar_metadatos_features
 from tc5061_proyecto_equipo18.modeling.comun import (
-    ROLES,
     cargar_dataset,
+    cronometro,
+    es_baseline,
     iniciar_run,
     muestrear,
+    registrar_conjuntos,
+    registrar_costos,
     registrar_figura,
+    registrar_importancias,
     registrar_metricas,
     registrar_modelo,
+    resolver_hiperparametros,
 )
 from tc5061_proyecto_equipo18.plots import (
     grafica_curvas_pr,
-    grafica_importancias,
     grafica_matriz_confusion,
     grafica_riesgo_por_bloque,
 )
@@ -55,7 +57,7 @@ CLASES_RIESGO = {1: "vaciado", 2: "llenado"}
 
 
 def metricas_clasificacion(real: np.ndarray, probabilidades: np.ndarray) -> dict[str, float]:
-    """Metricas de P2 para comparar baseline y candidato.
+    """Metricas de P2 para comparar todos los modelos.
 
     - ``f1_macro``: promedia por igual las tres clases; la exactitud seria enganosa porque
       casi todos los bloques son "sin riesgo".
@@ -99,19 +101,23 @@ def probabilidades_baseline(datos: pd.DataFrame) -> np.ndarray:
     return np.column_stack([sin_riesgo, vaciado, llenado])
 
 
-def probabilidades_modelo(modelo: HistGradientBoostingClassifier, X: pd.DataFrame) -> np.ndarray:
+def probabilidades_modelo(modelo, X: pd.DataFrame) -> np.ndarray:
     """``predict_proba`` con una columna por clase de ``CLASES``, aunque falte alguna en el ajuste."""
     probabilidades = np.zeros((len(X), len(CLASES)))
     probabilidades[:, modelo.classes_] = modelo.predict_proba(X)
     return probabilidades
 
 
-def entrenar_candidato(entrenamiento: pd.DataFrame) -> HistGradientBoostingClassifier:
-    """Ajusta el gradient boosting con pesos balanceados sobre todo el entrenamiento."""
-    modelo = HistGradientBoostingClassifier(
-        **config.P2_HIPERPARAMETROS, random_state=config.SEMILLA
-    )
-    return modelo.fit(entrenamiento[COLUMNAS_P2], entrenamiento[OBJETIVO_P2])
+def construir_estimador(modelo: str, hiperparametros: dict):
+    """Estimador de scikit-learn sin entrenar para un modelo del catalogo de P2."""
+    if modelo == "hgb_balanceado":
+        return HistGradientBoostingClassifier(**hiperparametros, random_state=config.SEMILLA)
+    raise ValueError(f"P2 no sabe construir el modelo {modelo!r}")
+
+
+def cargar_datos() -> dict[str, pd.DataFrame]:
+    """Parquet de P2 (lo escribe features.py) separado en las tres particiones."""
+    return cargar_dataset(config.DATASET_P2, columna_tiempo="bloque_inicio")
 
 
 def registrar_evaluacion(datos: dict[str, pd.DataFrame], probabilidades: dict[str, np.ndarray]):
@@ -141,54 +147,64 @@ def registrar_evaluacion(datos: dict[str, pd.DataFrame], probabilidades: dict[st
     )
 
 
-def correr_baseline(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run de la linea base. No registra modelo: es una regla sin parametros que ajustar."""
-    with iniciar_run(PREGUNTA, "baseline", "frecuencia_mismo_bloque", None, meta_features) as run:
-        probabilidades = {p: probabilidades_baseline(datos[p]) for p in PARTICIONES_EVALUACION}
-        registrar_evaluacion(datos, probabilidades)
-    return run.info.run_id
-
-
-def correr_candidato(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run del candidato: entrena, evalua, explica (importancias) y registra el modelo."""
-    parametros = {**config.P2_HIPERPARAMETROS, "n_variables": len(COLUMNAS_P2)}
-    with iniciar_run(PREGUNTA, "candidato", "hgb_balanceado", parametros, meta_features) as run:
-        modelo = entrenar_candidato(datos["entrenamiento"])
-        probabilidades = {
-            p: probabilidades_modelo(modelo, datos[p][COLUMNAS_P2]) for p in PARTICIONES_EVALUACION
-        }
-        registrar_evaluacion(datos, probabilidades)
-
-        # Importancia por permutacion en validacion: datos que el modelo no vio al entrenar
-        muestra = muestrear(datos["validacion"], config.P2_FILAS_IMPORTANCIA)
-        importancia = permutation_importance(
-            modelo,
-            muestra[COLUMNAS_P2],
-            muestra[OBJETIVO_P2],
-            scoring="f1_macro",
-            n_repeats=3,
-            random_state=config.SEMILLA,
-        )
-        importancias = pd.Series(importancia.importances_mean, index=COLUMNAS_P2)
-        registrar_figura(
-            grafica_importancias(importancias, "Importancia de variables (caida del F1 macro)"),
-            "importancias",
-        )
-        registrar_modelo(modelo, datos["entrenamiento"][COLUMNAS_P2].head(100))
-    return run.info.run_id
-
-
-def entrenar(
-    roles: tuple[str, ...] = ROLES,
+def correr(
+    modelo: str,
+    hiperparametros: dict | None = None,
     datos: dict[str, pd.DataFrame] | None = None,
     meta_features: dict | None = None,
-) -> list[str]:
-    """Punto de entrada que invoca train.py: corre los roles pedidos y devuelve sus run_id.
+    etapa: str | None = None,
+    anidado: bool = False,
+    nombre: str | None = None,
+) -> str:
+    """Entrena (salvo el baseline), evalua y registra un run de P2; devuelve su run_id.
 
-    ``datos`` y ``meta_features`` solo se pasan en las pruebas; por defecto se leen del
-    Parquet de P2 y de los metadatos de features (que validan la version de los datos).
+    ``hiperparametros`` son los ya resueltos (config.py con los cambios de ``-P``); si no se
+    pasan se usan los de config.py. ``datos`` y ``meta_features`` se pasan en las busquedas
+    (para leer el Parquet una sola vez) y en las pruebas.
     """
+    if hiperparametros is None:
+        hiperparametros = resolver_hiperparametros(PREGUNTA, modelo)
     if datos is None:
-        datos = cargar_dataset(config.DATASET_P2, columna_tiempo="bloque_inicio")
-    corredores = {"baseline": correr_baseline, "candidato": correr_candidato}
-    return [corredores[rol](datos, meta_features) for rol in roles]
+        datos = cargar_datos()
+    meta = meta_features if meta_features is not None else cargar_metadatos_features()
+    parametros = {"n_variables": len(COLUMNAS_P2)}
+
+    with iniciar_run(
+        PREGUNTA, modelo, etapa, hiperparametros, meta, nombre, anidado, parametros
+    ) as run:
+        registrar_conjuntos(
+            datos, PREGUNTA, config.DATASET_P2, COLUMNAS_P2, OBJETIVO_P2, meta["data_version"]
+        )
+        if es_baseline(PREGUNTA, modelo):
+            with cronometro() as inferencia:
+                probabilidades = {
+                    p: probabilidades_baseline(datos[p]) for p in PARTICIONES_EVALUACION
+                }
+            registrar_costos(0.0, inferencia["segundos"], len(datos["validacion"]))
+            registrar_evaluacion(datos, probabilidades)
+            return run.info.run_id
+
+        estimador = construir_estimador(modelo, hiperparametros)
+        entrenamiento = datos["entrenamiento"]
+        with cronometro() as ajuste:
+            estimador.fit(entrenamiento[COLUMNAS_P2], entrenamiento[OBJETIVO_P2])
+        with cronometro() as inferencia:
+            probabilidades = {
+                "validacion": probabilidades_modelo(estimador, datos["validacion"][COLUMNAS_P2])
+            }
+        probabilidades["prueba"] = probabilidades_modelo(estimador, datos["prueba"][COLUMNAS_P2])
+        registrar_costos(ajuste["segundos"], inferencia["segundos"], len(datos["validacion"]))
+        if hasattr(estimador, "n_iter_"):  # iteraciones reales con parada temprana
+            registrar_metricas({"iteraciones": np.max(estimador.n_iter_)}, "entrenamiento")
+        registrar_evaluacion(datos, probabilidades)
+
+        muestra_validacion = muestrear(datos["validacion"], config.P2_FILAS_IMPORTANCIA)
+        registrar_importancias(
+            estimador,
+            muestra_validacion[COLUMNAS_P2],
+            muestra_validacion[OBJETIVO_P2],
+            scoring="f1_macro",
+            titulo="Importancia de variables (caida del F1 macro)",
+        )
+        registrar_modelo(estimador, entrenamiento[COLUMNAS_P2].head(100))
+    return run.info.run_id

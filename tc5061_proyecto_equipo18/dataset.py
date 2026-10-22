@@ -6,6 +6,10 @@ Comandos (desde la raiz del repositorio, con el ambiente activado)::
     python -m tc5061_proyecto_equipo18.dataset verify    # compara los datos locales con el manifiesto
     python -m tc5061_proyecto_equipo18.dataset resumen   # tamanio real de los datos para el reporte
 
+``ingest`` es el punto de entrada ``ingest`` del MLflow Project
+(``mlflow run . -e ingest --env-manager local``); asi lanzado, ademas deja la version de los
+datos y el manifiesto en un run de MLflow con ``etapa = datos``.
+
 ``ingest`` no requiere pasos manuales:
 
 1. Descarga los meses de ``config.MES_INICIO`` a ``config.MES_FIN`` y la nomenclatura de
@@ -45,11 +49,13 @@ import typer
 from urllib3.util.retry import Retry
 
 from tc5061_proyecto_equipo18 import config
+from tc5061_proyecto_equipo18.seguimiento import registrar_etapa_datos
 
 app = typer.Typer(
     help="Ingesta reproducible y versionada de los datos abiertos de MiBici.",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_show_locals=False,
 )
 
 # =============================================================================
@@ -723,6 +729,7 @@ def ingest(
                 f"Datos reconstruidos identicos al manifiesto versionado "
                 f"(version {manifiesto.version}, {manifiesto.total_viajes:,} viajes)."
             )
+            registrar_ingesta_en_mlflow(manifiesto)
             return
         if not actualizar_manifiesto:
             detalle = "\n  - ".join(diferencias)
@@ -739,6 +746,25 @@ def ingest(
         f"version {manifiesto.version}, {len(registros)} meses, "
         f"{manifiesto.total_viajes:,} viajes, {manifiesto.estaciones_con_viajes} estaciones con viajes."
     )
+    registrar_ingesta_en_mlflow(manifiesto)
+
+
+def registrar_ingesta_en_mlflow(manifiesto: Manifiesto) -> None:
+    """Si la ingesta corre con ``mlflow run . -e ingest``, deja la version de datos en ese run."""
+    registrado = registrar_etapa_datos(
+        "datos-ingesta",
+        manifiesto.version,
+        parametros={"mes_inicio": manifiesto.mes_inicio, "mes_fin": manifiesto.mes_fin},
+        metricas={
+            "meses": len(manifiesto.meses),
+            "total_viajes": manifiesto.total_viajes,
+            "estaciones_nomenclatura": manifiesto.estaciones.estaciones,
+            "estaciones_con_viajes": manifiesto.estaciones_con_viajes,
+        },
+        archivos=[config.MANIFIESTO_DATOS],
+    )
+    if registrado:
+        logger.info(f"Ingesta registrada en MLflow (data_version {manifiesto.version})")
 
 
 @app.command()

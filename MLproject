@@ -1,23 +1,47 @@
-# MLflow Project del equipo 18: un run del experimento base con un solo comando.
-# Requisitos previos (una vez): ingesta y features (ver README).
+# MLflow Project del equipo 18: ingesta, variables, entrenamiento y busqueda con un solo comando.
 #
-#   mlflow run . -P pregunta=P1 -P tipo_modelo=candidato --env-manager local --experiment-name mibici-equipo18
+# Antes (ver README > Servidor de tracking): servidor local levantado en otra terminal y, en la
+# terminal donde se corre `mlflow run`:
+#   PowerShell:  $env:MLFLOW_TRACKING_URI = "http://127.0.0.1:5000"
+#                $env:MLFLOW_EXPERIMENT_NAME = "mibici-equipo18"
+#   bash/zsh:    export MLFLOW_TRACKING_URI=http://127.0.0.1:5000 MLFLOW_EXPERIMENT_NAME=mibici-equipo18
 #
-# - pregunta: P1, P2 o P3. tipo_modelo: baseline o candidato (un proyecto = un run).
-# - --env-manager local usa el ambiente ya activado (recomendado en Windows); sin esa opcion
-#   MLflow crea un ambiente nuevo a partir de python_env.yaml.
-# - --experiment-name debe ser el del proyecto (config.MLFLOW_EXPERIMENTO); si no, MLflow
-#   rechaza el run porque el experimento activo no coincide.
-# - Correrlo desde la raiz del repositorio, para que use el mismo mlflow.db que train.py.
-# - El parametro se llama tipo_modelo (no modelo) porque cada run ya registra un parametro
-#   "modelo" con el nombre del algoritmo, y MLflow no permite dos valores para el mismo parametro.
+# Ejemplos, desde la raiz del repositorio:
+#   mlflow run . -e ingest --env-manager local
+#   mlflow run . -e features --env-manager local
+#   mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local
+#   mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson -P learning_rate=0.05 --env-manager local
+#   mlflow run . -e search -P pregunta=p2 --env-manager local
+#
+# - Rutas, fechas, cortes, semilla, modelos e hiperparametros por defecto viven en config.py
+#   (P1_MODELOS, P2_MODELOS, P3_MODELOS y P*_BUSQUEDA); aqui no se repite ninguno.
+# - Cualquier hiperparametro del catalogo se cambia con -P nombre=valor: MLflow lo pasa a
+#   train.py como --nombre valor y lo registra como parametro del run. Los valores van sin
+#   espacios.
+# - --env-manager local usa el ambiente ya activado (.venv, instalado con requirements.txt).
+#   Sin esa opcion, MLflow crea un ambiente nuevo con python_env.yaml (requiere pyenv o uv).
 name: mibici-equipo18
 
 python_env: python_env.yaml
 
 entry_points:
-  main:
+  # Descarga, normaliza y versiona los datos (dataset.py); registra la version de datos
+  ingest:
+    command: "python -m tc5061_proyecto_equipo18.dataset ingest"
+
+  # Construye las variables de P1, P2 y P3 (features.py)
+  features:
+    command: "python -m tc5061_proyecto_equipo18.features"
+
+  # Entrena un modelo del catalogo: baseline o candidato. Hiperparametros extra con -P.
+  train:
     parameters:
-      pregunta: {type: string, default: P1}
-      tipo_modelo: {type: string, default: candidato}
-    command: "python -m tc5061_proyecto_equipo18.modeling.train --pregunta {pregunta} --modelo {tipo_modelo}"
+      pregunta: {type: string}
+      modelo: {type: string}
+    command: "python -m tc5061_proyecto_equipo18.modeling.train --pregunta {pregunta} --modelo {modelo}"
+
+  # Busqueda de hiperparametros con nested runs (rejilla en config.py)
+  search:
+    parameters:
+      pregunta: {type: string}
+    command: "python -m tc5061_proyecto_equipo18.modeling.busqueda --pregunta {pregunta}"

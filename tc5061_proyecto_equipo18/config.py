@@ -48,18 +48,20 @@ DATASET_P3 = PROCESSED_DATA_DIR / "p3_perfiles_estacion.parquet"
 FEATURES_META = PROCESSED_DATA_DIR / "features_meta.json"
 MANIFIESTO_DATOS = REFERENCES_DIR / "manifiesto_datos.json"
 RESUMEN_DATOS_MD = REPORTS_DIR / "resumen_datos.md"
-FIGURAS_EXPERIMENTO_DIR = FIGURES_DIR / "experimento_base"
+RESULTADOS_ENTREGA2_MD = REPORTS_DIR / "resultados_entrega2.md"
 EDA_FIGURAS_DIR = FIGURES_DIR / "eda"
+# Archivos que cada run guarda en config/ para poder reproducirlo (rutas relativas a la raiz)
+ARCHIVOS_CONFIGURACION = (
+    "MLproject",
+    "python_env.yaml",
+    "requirements.txt",
+    "tc5061_proyecto_equipo18/config.py",
+)
 
 
 def ruta_viajes_mes(mes: str) -> Path:
     """Parquet limpio de un mes ``AAAA-MM`` (lo escribe dataset.py y lo lee features.py)."""
     return VIAJES_DIR / f"viajes_{mes.replace('-', '_')}.parquet"
-
-
-def ruta_modelo(nombre_run: str) -> Path:
-    """Copia local del modelo de un run (la escribe el experimento y la lee predict.py)."""
-    return MODELS_DIR / f"{nombre_run}.joblib"
 
 
 def ruta_predicciones(pregunta: str, particion: str) -> Path:
@@ -267,6 +269,27 @@ P1_HIPERPARAMETROS = {
     "validation_fraction": 0.1,
     "n_iter_no_change": 20,
 }
+# Catalogo de P1: nombre del modelo -> familia e hiperparametros por defecto. Son los valores
+# que usa `mlflow run . -e train -P pregunta=p1 -P modelo=<nombre>`; cualquiera se cambia en
+# una corrida con -P <hiperparametro>=<valor>.
+P1_MODELOS = {
+    # Baseline de la entrega 1: salidas de la misma hora hace 7 dias (regla, sin entrenamiento)
+    "rezago_semanal": {"familia": "regla", "baseline": True, "hiperparametros": {}},
+    # Candidato de la entrega 1: gradient boosting con perdida Poisson
+    "hgb_poisson": {"familia": "gradient_boosting", "hiperparametros": P1_HIPERPARAMETROS},
+    # Mismo algoritmo con perdida cuadratica: mide cuanto aporta la perdida Poisson
+    "hgb_cuadratico": {
+        "familia": "gradient_boosting",
+        "hiperparametros": {**P1_HIPERPARAMETROS, "loss": "squared_error"},
+    },
+    # Modelo lineal generalizado Poisson con hora, dia y mes en one-hot: barato e interpretable
+    "glm_poisson": {"familia": "lineal", "hiperparametros": {"alpha": 0.0001, "max_iter": 100}},
+}
+# Busqueda de hiperparametros (nested runs): una corrida hija por combinacion de la rejilla
+P1_BUSQUEDA = {
+    "modelo": "hgb_poisson",
+    "rejilla": {"learning_rate": [0.05, 0.15], "max_leaf_nodes": [31, 127]},
+}
 
 # =============================================================================
 # P2 - Clasificacion: riesgo de vaciarse o llenarse en un bloque horario
@@ -286,30 +309,118 @@ P2_HIPERPARAMETROS = {
     "validation_fraction": 0.1,
     "n_iter_no_change": 20,
 }
+# Catalogo de P2 (mismo formato que P1_MODELOS). `peso_riesgo` es el peso de las clases de
+# riesgo frente a "sin riesgo": 1 = sin ponderar; "balanced" equivale a cerca de 65, porque
+# cada clase de riesgo es el 1.5 % de los bloques.
+P2_MODELOS = {
+    # Baseline de la entrega 1: clase mas frecuente del mismo bloque en los 7 dias previos
+    "frecuencia_mismo_bloque": {"familia": "regla", "baseline": True, "hiperparametros": {}},
+    # Candidato de la entrega 1: gradient boosting con pesos de clase balanceados
+    "hgb_balanceado": {"familia": "gradient_boosting", "hiperparametros": P2_HIPERPARAMETROS},
+    # Mismo algoritmo con un peso intermedio: menos alertas falsas que "balanced"
+    "hgb_ponderado": {
+        "familia": "gradient_boosting",
+        "hiperparametros": {
+            **{
+                clave: valor
+                for clave, valor in P2_HIPERPARAMETROS.items()
+                if clave != "class_weight"
+            },
+            "peso_riesgo": 5.0,
+        },
+    },
+    # Regresion logistica multinomial con variables escaladas: referencia lineal y barata
+    "logistica": {
+        "familia": "lineal",
+        "hiperparametros": {"C": 1.0, "peso_riesgo": 5.0, "max_iter": 1000},
+    },
+}
+P2_BUSQUEDA = {"modelo": "hgb_ponderado", "rejilla": {"peso_riesgo": [1.0, 3.0, 10.0, 30.0]}}
 
 # =============================================================================
 # P3 - Clustering: grupos de estaciones con patrones de uso parecidos
 # =============================================================================
 P3_MIN_VIAJES = 500  # salidas + llegadas minimas en el periodo para perfilar una estacion
-P3_GRUPOS_BASELINE = 4  # cuartiles de volumen
-P3_K_CANDIDATOS = (3, 4, 5, 6, 7, 8)
+# Espacio comun en que se agrupa y se evalua (escalado + PCA ajustados con entrenamiento):
+# el mismo para todos los modelos, para que sus metricas sean comparables.
 P3_VARIANZA_PCA = 0.90
-P3_HIPERPARAMETROS = {"n_init": 20}  # reinicios de K-means con distinta semilla interna
+# Catalogo de P3 (mismo formato que P1_MODELOS)
+P3_MODELOS = {
+    # Baseline de la entrega 1: grupos por cuartiles del volumen diario
+    "cuartiles_volumen": {"familia": "regla", "baseline": True, "hiperparametros": {"grupos": 4}},
+    # Candidato de la entrega 1: K-means; k = 3 fue el de mayor silhouette en la entrega 1
+    "kmeans_pca": {"familia": "kmeans", "hiperparametros": {"n_clusters": 3, "n_init": 20}},
+    # Mezcla gaussiana: grupos con forma y tamanio distintos (covarianza diagonal)
+    "gmm_pca": {
+        "familia": "mezcla_gaussiana",
+        "hiperparametros": {"n_components": 3, "covariance_type": "diag", "n_init": 5},
+    },
+    # Jerarquico aglomerativo (Ward); las estaciones nuevas van al centroide mas cercano
+    "jerarquico_pca": {
+        "familia": "jerarquico",
+        "hiperparametros": {"n_clusters": 3, "linkage": "ward"},
+    },
+}
+P3_BUSQUEDA = {"modelo": "kmeans_pca", "rejilla": {"n_clusters": [2, 3, 4, 5, 6, 7, 8]}}
 
 # =============================================================================
 # MLflow
 # =============================================================================
 EQUIPO = "equipo18"
 MLFLOW_EXPERIMENTO = "mibici-equipo18"
-# Por defecto, base SQLite en la raiz del repo; se puede cambiar en .env
-MLFLOW_TRACKING_URI = os.getenv(
-    "MLFLOW_TRACKING_URI", f"sqlite:///{(PROJ_ROOT / 'mlflow.db').as_posix()}"
-)
+# Servidor local de tracking con base de datos (lo pide el Model Registry). Se levanta con
+#   mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+# y se puede cambiar con la variable de entorno MLFLOW_TRACKING_URI (o en .env).
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+# Solo sin servidor (por ejemplo, en las pruebas): artefactos en mlruns/, ignorado por Git
 MLFLOW_ARTEFACTOS_DIR = PROJ_ROOT / "mlruns"
 # MLflow guarda los modelos de scikit-learn en formato skops (no ejecuta codigo al cargarlos).
 # Desde skops 0.15, los arboles de HistGradientBoosting no son "de confianza" por defecto;
 # como solo cargamos modelos que entrenamos nosotros, se declaran aqui de forma explicita.
 SKOPS_TIPOS_CONFIABLES = ["sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor"]
+
+# Catalogos y busquedas de las tres preguntas (definidos arriba, en la seccion de cada una)
+MODELOS = {"P1": P1_MODELOS, "P2": P2_MODELOS, "P3": P3_MODELOS}
+BUSQUEDAS = {"P1": P1_BUSQUEDA, "P2": P2_BUSQUEDA, "P3": P3_BUSQUEDA}
+# Metrica con la que se compara y se elige cada modelo (las de la entrega 1) y su sentido
+METRICAS_SELECCION = {
+    "P1": ("validacion_mae", "min"),
+    "P2": ("validacion_f1_macro", "max"),
+    "P3": ("entrenamiento_silhouette", "max"),
+}
+
+# =============================================================================
+# Model Registry: un modelo registrado por pregunta; la version en produccion lleva el
+# alias "champion" y, opcionalmente, la siguiente mejor lleva "challenger"
+# =============================================================================
+MODELOS_REGISTRADOS = {
+    "P1": "mibici-equipo18-p1-demanda",
+    "P2": "mibici-equipo18-p2-riesgo",
+    "P3": "mibici-equipo18-p3-grupos",
+}
+DESCRIPCIONES_REGISTRO = {
+    "P1": (
+        "P1 - Demanda de MiBici (regresion). Predice cuantos viajes saldran de cada estacion en "
+        "cada hora del dia siguiente. Entrada: variables de features.COLUMNAS_P1, calculadas al "
+        "cierre del dia anterior. Salida: viajes esperados. Lo usa el operador para planear la "
+        "flota. Se elige con el MAE de validacion (viajes por estacion y hora)."
+    ),
+    "P2": (
+        "P2 - Riesgo de desabasto de MiBici (clasificacion). Por estacion y bloque de 3 h "
+        "predice 0 = sin riesgo, 1 = riesgo de vaciado o 2 = riesgo de llenado. Entrada: "
+        "variables de features.COLUMNAS_P2 al inicio del bloque. Lo usa el equipo de "
+        "rebalanceo para priorizar estaciones. Se elige con el F1 macro de validacion."
+    ),
+    "P3": (
+        "P3 - Grupos de estaciones de MiBici (clustering). Asigna cada estacion a un grupo "
+        "segun su perfil de uso: reparto horario de salidas y llegadas, volumen, relacion fin "
+        "de semana/laboral y balance. El escalado y la PCA van dentro del modelo. Lo usa "
+        "planeacion para zonificar el rebalanceo y la expansion. Se elige con la silhouette y "
+        "la estabilidad (ARI) de los grupos."
+    ),
+}
+ALIAS_PRODUCCION = "champion"
+ALIAS_RETADOR = "challenger"
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135

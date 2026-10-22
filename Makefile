@@ -57,35 +57,40 @@ create_environment:
 #################################################################################
 
 
-## Download, normalize and version the MiBici data (ingesta)
+## Download, normalize and version the MiBici data (ingesta) with the MLflow Project
 .PHONY: data
 data:
-	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.dataset ingest
+	mlflow run . -e ingest --env-manager local
 
 ## Verify local data against references/manifiesto_datos.json
 .PHONY: verify
 verify:
 	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.dataset verify
 
-## Build the P1, P2 and P3 datasets
+## Build the P1, P2 and P3 datasets with the MLflow Project
 .PHONY: features
 features:
-	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.features
+	mlflow run . -e features --env-manager local
 
-## Run the 6 baseline/candidate runs of the experiment in MLflow
+## Start the local MLflow tracking server (UI + Model Registry) on http://127.0.0.1:5000
+.PHONY: mlflow-server
+mlflow-server:
+	mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+
+## Train one model with the MLflow Project, e.g. make train PREGUNTA=p1 MODELO=hgb_poisson
 .PHONY: train
 train:
-	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.train --todos
+	mlflow run . -e train -P pregunta=$(PREGUNTA) -P modelo=$(MODELO) --env-manager local
+
+## Run the nested hyperparameter search of one question, e.g. make search PREGUNTA=p2
+.PHONY: search
+search:
+	mlflow run . -e search -P pregunta=$(PREGUNTA) --env-manager local
 
 ## Run the tests
 .PHONY: test
 test:
 	$(PYTHON_INTERPRETER) -m pytest
-
-## Open the MLflow UI on http://localhost:5000
-.PHONY: mlflow-ui
-mlflow-ui:
-	mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 
 #################################################################################

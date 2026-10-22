@@ -1,23 +1,22 @@
 """P1 - Regresion: cuantos viajes saldran de cada estacion en cada hora del dia siguiente.
 
-Dos runs en MLflow, evaluados con las mismas metricas y particiones:
+Modelos del catalogo ``config.P1_MODELOS``, todos evaluados con las mismas metricas y
+particiones que en la entrega 1:
 
-- ``baseline`` (``rezago_semanal``): predice las salidas de la misma hora de hace una semana.
-  Es el pronostico ingenuo estacional; cualquier modelo debe superarlo para justificarse.
-- ``candidato`` (``hgb_poisson``): ``HistGradientBoostingRegressor`` con perdida Poisson
-  (las salidas son conteos no negativos) sobre las variables de ``features.COLUMNAS_P1``.
-
-Ambos se evaluan en validacion (para comparar y elegir) y en prueba (estimacion final).
+- ``rezago_semanal`` (baseline): las salidas de la misma hora de hace una semana. Es el
+  pronostico ingenuo estacional; cualquier modelo debe superarlo para justificarse.
+- ``hgb_poisson``: ``HistGradientBoostingRegressor`` con perdida Poisson (las salidas son
+  conteos no negativos) sobre las variables de ``features.COLUMNAS_P1``.
 
 Uso::
 
-    python -m tc5061_proyecto_equipo18.modeling.train --pregunta P1
+    mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson --env-manager local
+    mlflow run . -e search -P pregunta=p1 --env-manager local
 """
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     mean_absolute_error,
     mean_poisson_deviance,
@@ -26,21 +25,22 @@ from sklearn.metrics import (
 )
 
 from tc5061_proyecto_equipo18 import config
-from tc5061_proyecto_equipo18.features import COLUMNAS_P1, OBJETIVO_P1
+from tc5061_proyecto_equipo18.features import COLUMNAS_P1, OBJETIVO_P1, cargar_metadatos_features
 from tc5061_proyecto_equipo18.modeling.comun import (
-    ROLES,
     cargar_dataset,
+    cronometro,
+    es_baseline,
     iniciar_run,
     muestrear,
+    registrar_conjuntos,
+    registrar_costos,
     registrar_figura,
+    registrar_importancias,
     registrar_metricas,
     registrar_modelo,
+    resolver_hiperparametros,
 )
-from tc5061_proyecto_equipo18.plots import (
-    grafica_error_por_hora,
-    grafica_importancias,
-    grafica_real_vs_predicho,
-)
+from tc5061_proyecto_equipo18.plots import grafica_error_por_hora, grafica_real_vs_predicho
 
 PREGUNTA = "P1"
 PARTICIONES_EVALUACION = ("validacion", "prueba")
@@ -50,13 +50,13 @@ PREDICCION_MINIMA = 1e-6
 
 
 def metricas_regresion(real: np.ndarray, predicho: np.ndarray) -> dict[str, float]:
-    """Metricas de P1 para comparar baseline y candidato.
+    """Metricas de P1 para comparar todos los modelos.
 
     - ``mae``: error medio en viajes por estacion-hora; es la que entiende el operador.
     - ``rmse``: castiga mas los errores grandes (horas pico mal estimadas).
     - ``wape``: error absoluto total entre viajes totales; comparable entre periodos con
       distinto volumen y estable aunque muchas horas tengan 0 salidas.
-    - ``devianza_poisson``: ajuste propio de conteos; es la perdida que optimiza el candidato.
+    - ``devianza_poisson``: ajuste propio de conteos; es la perdida que optimiza ``hgb_poisson``.
     - ``r2``: fraccion de la variacion explicada.
     """
     real = np.asarray(real, dtype=float)
@@ -82,17 +82,16 @@ def predecir_baseline(datos: pd.DataFrame) -> np.ndarray:
     return datos[COLUMNA_BASELINE].to_numpy(dtype=float)
 
 
-def entrenar_candidato(entrenamiento: pd.DataFrame) -> HistGradientBoostingRegressor:
-    """Ajusta el gradient boosting con perdida Poisson sobre una muestra del entrenamiento.
+def construir_estimador(modelo: str, hiperparametros: dict):
+    """Estimador de scikit-learn sin entrenar para un modelo del catalogo de P1."""
+    if modelo == "hgb_poisson":
+        return HistGradientBoostingRegressor(**hiperparametros, random_state=config.SEMILLA)
+    raise ValueError(f"P1 no sabe construir el modelo {modelo!r}")
 
-    La muestra (``P1_MAX_FILAS_ENTRENAMIENTO`` filas, con la semilla del proyecto) acota la
-    memoria sin perder estaciones ni horas: con 18 meses hay mas filas de las necesarias.
-    """
-    muestra = muestrear(entrenamiento, config.P1_MAX_FILAS_ENTRENAMIENTO)
-    modelo = HistGradientBoostingRegressor(
-        **config.P1_HIPERPARAMETROS, random_state=config.SEMILLA
-    )
-    return modelo.fit(muestra[COLUMNAS_P1], muestra[OBJETIVO_P1])
+
+def cargar_datos() -> dict[str, pd.DataFrame]:
+    """Parquet de P1 (lo escribe features.py) separado en las tres particiones."""
+    return cargar_dataset(config.DATASET_P1, columna_tiempo="hora")
 
 
 def registrar_evaluacion(datos: dict[str, pd.DataFrame], predicciones: dict[str, np.ndarray]):
@@ -114,62 +113,69 @@ def registrar_evaluacion(datos: dict[str, pd.DataFrame], predicciones: dict[str,
     )
 
 
-def correr_baseline(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run de la linea base. No registra modelo: es una regla sin parametros que ajustar."""
-    with iniciar_run(
-        PREGUNTA,
-        "baseline",
-        "rezago_semanal",
-        {"columna_baseline": COLUMNA_BASELINE},
-        meta_features,
-    ) as run:
-        predicciones = {p: predecir_baseline(datos[p]) for p in PARTICIONES_EVALUACION}
-        registrar_evaluacion(datos, predicciones)
-    return run.info.run_id
-
-
-def correr_candidato(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run del candidato: entrena, evalua, explica (importancias) y registra el modelo."""
-    parametros = {
-        **config.P1_HIPERPARAMETROS,
-        "max_filas_entrenamiento": config.P1_MAX_FILAS_ENTRENAMIENTO,
-        "n_variables": len(COLUMNAS_P1),
-    }
-    with iniciar_run(PREGUNTA, "candidato", "hgb_poisson", parametros, meta_features) as run:
-        modelo = entrenar_candidato(datos["entrenamiento"])
-        predicciones = {p: modelo.predict(datos[p][COLUMNAS_P1]) for p in PARTICIONES_EVALUACION}
-        registrar_evaluacion(datos, predicciones)
-
-        # Importancia por permutacion en validacion: datos que el modelo no vio al entrenar
-        muestra = muestrear(datos["validacion"], config.P1_FILAS_IMPORTANCIA)
-        importancia = permutation_importance(
-            modelo,
-            muestra[COLUMNAS_P1],
-            muestra[OBJETIVO_P1],
-            scoring="neg_mean_absolute_error",
-            n_repeats=3,
-            random_state=config.SEMILLA,
-        )
-        importancias = pd.Series(importancia.importances_mean, index=COLUMNAS_P1)
-        registrar_figura(
-            grafica_importancias(importancias, "Importancia de variables (caida del MAE)"),
-            "importancias",
-        )
-        registrar_modelo(modelo, datos["entrenamiento"][COLUMNAS_P1].head(100))
-    return run.info.run_id
-
-
-def entrenar(
-    roles: tuple[str, ...] = ROLES,
+def correr(
+    modelo: str,
+    hiperparametros: dict | None = None,
     datos: dict[str, pd.DataFrame] | None = None,
     meta_features: dict | None = None,
-) -> list[str]:
-    """Punto de entrada que invoca train.py: corre los roles pedidos y devuelve sus run_id.
+    etapa: str | None = None,
+    anidado: bool = False,
+    nombre: str | None = None,
+) -> str:
+    """Entrena (salvo el baseline), evalua y registra un run de P1; devuelve su run_id.
 
-    ``datos`` y ``meta_features`` solo se pasan en las pruebas; por defecto se leen del
-    Parquet de P1 y de los metadatos de features (que validan la version de los datos).
+    ``hiperparametros`` son los ya resueltos (config.py con los cambios de ``-P``); si no se
+    pasan se usan los de config.py. ``datos`` y ``meta_features`` se pasan en las busquedas
+    (para leer el Parquet una sola vez) y en las pruebas.
     """
+    if hiperparametros is None:
+        hiperparametros = resolver_hiperparametros(PREGUNTA, modelo)
     if datos is None:
-        datos = cargar_dataset(config.DATASET_P1, columna_tiempo="hora")
-    corredores = {"baseline": correr_baseline, "candidato": correr_candidato}
-    return [corredores[rol](datos, meta_features) for rol in roles]
+        datos = cargar_datos()
+    meta = meta_features if meta_features is not None else cargar_metadatos_features()
+    baseline = es_baseline(PREGUNTA, modelo)
+    parametros = {"n_variables": len(COLUMNAS_P1)}
+    if baseline:
+        parametros["columna_baseline"] = COLUMNA_BASELINE
+    else:
+        parametros["max_filas_entrenamiento"] = config.P1_MAX_FILAS_ENTRENAMIENTO
+
+    with iniciar_run(
+        PREGUNTA, modelo, etapa, hiperparametros, meta, nombre, anidado, parametros
+    ) as run:
+        registrar_conjuntos(
+            datos, PREGUNTA, config.DATASET_P1, COLUMNAS_P1, OBJETIVO_P1, meta["data_version"]
+        )
+        if baseline:
+            with cronometro() as inferencia:
+                predicciones = {p: predecir_baseline(datos[p]) for p in PARTICIONES_EVALUACION}
+            registrar_costos(0.0, inferencia["segundos"], len(datos["validacion"]))
+            registrar_evaluacion(datos, predicciones)
+            return run.info.run_id
+
+        # La muestra (P1_MAX_FILAS_ENTRENAMIENTO filas, con la semilla del proyecto) acota la
+        # memoria sin perder estaciones ni horas: con 18 meses hay mas filas de las necesarias.
+        muestra = muestrear(datos["entrenamiento"], config.P1_MAX_FILAS_ENTRENAMIENTO)
+        estimador = construir_estimador(modelo, hiperparametros)
+        with cronometro() as entrenamiento:
+            estimador.fit(muestra[COLUMNAS_P1], muestra[OBJETIVO_P1])
+        with cronometro() as inferencia:
+            predicciones = {"validacion": estimador.predict(datos["validacion"][COLUMNAS_P1])}
+        predicciones["prueba"] = estimador.predict(datos["prueba"][COLUMNAS_P1])
+        registrar_costos(
+            entrenamiento["segundos"], inferencia["segundos"], len(datos["validacion"])
+        )
+        if hasattr(estimador, "n_iter_"):  # iteraciones reales con parada temprana
+            registrar_metricas({"iteraciones": estimador.n_iter_}, "entrenamiento")
+        registrar_evaluacion(datos, predicciones)
+
+        muestra_validacion = muestrear(datos["validacion"], config.P1_FILAS_IMPORTANCIA)
+        registrar_importancias(
+            estimador,
+            muestra_validacion[COLUMNAS_P1],
+            muestra_validacion[OBJETIVO_P1],
+            scoring="neg_mean_absolute_error",
+            titulo="Importancia de variables (caida del MAE)",
+        )
+        registrar_modelo(estimador, datos["entrenamiento"][COLUMNAS_P1].head(100))
+    return run.info.run_id

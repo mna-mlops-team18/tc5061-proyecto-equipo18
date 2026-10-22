@@ -53,9 +53,9 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 ```
 |-- .github/                      <- Plantilla de Pull Request
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
-|-- Makefile                      <- Atajos: make data, make verify, make features, make train, make test
-|-- MLproject                     <- MLflow Project: un run del experimento con `mlflow run`
-|-- python_env.yaml               <- Ambiente del MLflow Project
+|-- Makefile                      <- Atajos para Linux y macOS: make mlflow-server, make train, make test
+|-- MLproject                     <- MLflow Project: puntos de entrada ingest, features, train y search
+|-- python_env.yaml               <- Ambiente del MLflow Project (versiones de requirements.txt)
 |-- README.md
 |-- pyproject.toml                <- Metadatos del paquete y configuracion de pytest y ruff
 |-- requirements.txt              <- Dependencias con version fija (==)
@@ -75,15 +75,17 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |
 +-- tc5061_proyecto_equipo18/     <- Codigo fuente
     |-- config.py                 <- Unico lugar de rutas, fechas, semillas y parametros
-    |-- dataset.py                <- Ingesta: descarga, normaliza, Parquet y manifiesto
-    |-- features.py               <- Variables de P1, P2 y P3 sin fuga de informacion
+    |-- dataset.py                <- Ingesta: descarga, normaliza, Parquet y manifiesto (entry point ingest)
+    |-- features.py               <- Variables de P1, P2 y P3 sin fuga (entry point features)
+    |-- seguimiento.py            <- Registra en MLflow las etapas de datos
     |-- plots.py                  <- Figuras y mapas
     +-- modeling/
-        |-- comun.py              <- Registro comun en MLflow: run, etiquetas, parametros, metricas, modelo
-        |-- p1_regresion.py       <- P1: rezago semanal vs. HistGradientBoosting Poisson
-        |-- p2_clasificacion.py   <- P2: frecuencia del bloque vs. HistGradientBoosting balanceado
-        |-- p3_clustering.py      <- P3: cuartiles de volumen vs. K-means sobre PCA
-        |-- train.py              <- Orquesta el experimento base (--todos, --pregunta, --modelo)
+        |-- comun.py              <- Registro comun: etiquetas, parametros, artefactos, conjuntos y modelo
+        |-- p1_regresion.py       <- P1: modelos del catalogo de config.py (regresion)
+        |-- p2_clasificacion.py   <- P2: modelos del catalogo de config.py (clasificacion)
+        |-- p3_clustering.py      <- P3: modelos del catalogo de config.py (clustering)
+        |-- train.py              <- Entry point train: un modelo del catalogo por corrida
+        |-- busqueda.py           <- Entry point search: busqueda con nested runs
         +-- predict.py            <- Plantilla de inferencia (siguientes entregas)
 ```
 
@@ -128,8 +130,8 @@ selecciona el kernel del ambiente `.venv`; `ipykernel` ya viene instalado.
 Sin pasos manuales; todos los comandos se corren desde la raiz con el ambiente activado.
 
 ```bash
-make data       # python -m tc5061_proyecto_equipo18.dataset ingest
-make verify     # python -m tc5061_proyecto_equipo18.dataset verify
+mlflow run . -e ingest --env-manager local            # o: python -m tc5061_proyecto_equipo18.dataset ingest
+python -m tc5061_proyecto_equipo18.dataset verify     # o: make verify
 python -m tc5061_proyecto_equipo18.dataset resumen    # regenera reports/resumen_datos.md
 ```
 
@@ -144,48 +146,46 @@ python -m tc5061_proyecto_equipo18.dataset resumen    # regenera reports/resumen
 Despues de la ingesta, las variables se construyen con:
 
 ```bash
-make features   # python -m tc5061_proyecto_equipo18.features
-make test       # pytest
+mlflow run . -e features --env-manager local          # o: python -m tc5061_proyecto_equipo18.features
+python -m pytest                                      # o: make test
 ```
 
-## Experimento base en MLflow
+Los comandos `mlflow run` necesitan el servidor de MLflow (seccion siguiente).
 
-Un experimento, `mibici-equipo18`, con un baseline y un candidato por pregunta (6 runs). Se
-corre desde el codigo del repositorio, despues de la ingesta y de `make features`:
+## Experimentos en MLflow
+
+**Servidor de tracking.** El Model Registry necesita una base de datos, asi que se usa un
+servidor local de MLflow. En una terminal propia, desde la raiz del repo y con el ambiente
+activado:
 
 ```bash
-make train      # python -m tc5061_proyecto_equipo18.modeling.train --todos
-python -m tc5061_proyecto_equipo18.modeling.train --pregunta P2 --modelo candidato   # un solo run
-make mlflow-ui  # mlflow ui --backend-store-uri sqlite:///mlflow.db  ->  http://localhost:5000
+mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000   # o: make mlflow-server
 ```
 
-Tambien como MLflow Project (un run por comando, desde la raiz del repo):
+En la terminal donde se corre `mlflow run` (PowerShell; en bash usar `export`):
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "http://127.0.0.1:5000"
+$env:MLFLOW_EXPERIMENT_NAME = "mibici-equipo18"
+```
+
+**MLflow Project.** `MLproject` tiene los puntos de entrada `ingest`, `features`, `train`
+(`pregunta`, `modelo` y cualquier hiperparametro con `-P`) y `search` (busqueda con nested
+runs). Los modelos, hiperparametros por defecto y rejillas de busqueda viven en `config.py`
+(`P1_MODELOS`, `P2_MODELOS`, `P3_MODELOS` y `P*_BUSQUEDA`):
 
 ```bash
-mlflow run . -P pregunta=P1 -P tipo_modelo=candidato --env-manager local --experiment-name mibici-equipo18
+mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local
+mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson -P learning_rate=0.05 --env-manager local
+mlflow run . -e search -P pregunta=p3 --env-manager local
 ```
 
-| Pregunta | Baseline (run) | Candidato (run) | Metricas |
-|---|---|---|---|
-| P1 | `p1-baseline-rezago_semanal`: salidas de la misma hora hace 7 dias | `p1-candidato-hgb_poisson`: HistGradientBoosting con perdida Poisson | `mae`, `rmse`, `wape`, `devianza_poisson`, `r2` |
-| P2 | `p2-baseline-frecuencia_mismo_bloque`: clase mas frecuente del bloque en 7 dias | `p2-candidato-hgb_balanceado`: HistGradientBoosting con pesos balanceados | `f1_macro`, `balanced_accuracy`, `recall_*`, `precision_*`, `pr_auc_*` |
-| P3 | `p3-baseline-cuartiles_volumen`: cuartiles del volumen diario | `p3-candidato-kmeans_pca`: K-means sobre PCA, k por silhouette | `silhouette`, `davies_bouldin`, `calinski_harabasz`, `estabilidad_ari` |
-
-Cada run registra (ver `modeling/comun.py`):
-
-- **Parametros:** semilla, parametros de features (rango de fechas, cortes de la particion,
-  filtros, horizonte, rezagos, bloque y umbral de riesgo), `data_version`, `modelo` y sus
-  hiperparametros.
-- **Metricas** con el conjunto en el nombre: `entrenamiento_*`, `validacion_*`, `prueba_*`.
-- **Etiquetas:** `equipo`, `pregunta`, `rol` (baseline o candidato), `modelo`, `data_version`,
-  `git_commit` y `git_sucio`.
-- **Artefactos:** figuras de diagnostico, `features_meta.json`, el manifiesto de datos y, en
-  los candidatos, el modelo en formato MLflow (skops). P3 agrega el mapa interactivo de grupos
-  y las tablas de resumen y asignaciones.
-
-Para que el `git_commit` de cada run sea fiel, corre el experimento sin cambios pendientes en
-archivos versionados (`git_sucio = false`). La propuesta completa y la lectura de resultados
-estan en `reports/propuesta_entrega1.md`.
+Cada corrida registra las etiquetas `pregunta`, `etapa` (baseline, candidato, busqueda),
+`modelo`, `familia_modelo`, `equipo`, `data_version`, `git_commit` y `git_sucio`; los
+parametros (semilla, features, hiperparametros); metricas con el conjunto en el nombre
+(`validacion_mae`, `prueba_f1_macro`, ...) y de costo; y artefactos en `config/`, `datos/`,
+`figuras/` (mas `tablas/` y `mapas/` en P3), el modelo con firma y los conjuntos de datos con
+`mlflow.log_input`. La propuesta de la entrega 1 esta en `reports/propuesta_entrega1.md`.
 
 ## Flujo de trabajo con Git y GitHub
 
@@ -222,9 +222,9 @@ Practicas obligatorias de la entrega y como las aplica el repositorio:
 
 | Ambito | Practica | Como la aplicamos | Donde se verifica |
 |---|---|---|---|
-| MLflow | Un experimento por proyecto y runs con nombre descriptivo | Experimento `mibici-equipo18`; runs `p<n>-<rol>-<modelo>`, p. ej. `p1-baseline-rezago_semanal` | Interfaz de MLflow |
+| MLflow | Un experimento por proyecto y runs con nombre descriptivo | Experimento `mibici-equipo18`; runs `p<n>-<etapa>-<modelo>`, p. ej. `p1-baseline-rezago_semanal` | Interfaz de MLflow |
 | MLflow | Registrar lo necesario para reproducir el run | Parametros `features.mes_inicio`, `features.mes_fin`, `data_version`, `semilla`, `modelo` e hiperparametros | Parametros del run |
-| MLflow | Ligar cada run con su codigo y su pregunta | Etiquetas `git_commit`, `git_sucio`, `pregunta`, `rol`, `equipo` | Etiquetas del run |
+| MLflow | Ligar cada run con su codigo y su pregunta | Etiquetas `git_commit`, `git_sucio`, `pregunta`, `etapa`, `familia_modelo`, `equipo` | Etiquetas del run |
 | MLflow | Metricas con el conjunto en el nombre | `validacion_mae`, `prueba_f1_macro`, `prueba_estabilidad_ari`... | Metricas del run |
 | MLflow | Sin credenciales ni datos personales | Usuario, genero y anio de nacimiento no se leen del CSV; la URI de MLflow va en `.env`; los artefactos solo tienen agregados por estacion | Interfaz de MLflow y codigo |
 | Estructura | Notebooks solo para exploracion, con la convencion de la plantilla | `notebooks/1.0-ja-exploracion-viajes.ipynb`; la logica vive en el modulo | Carpeta `notebooks/` |
