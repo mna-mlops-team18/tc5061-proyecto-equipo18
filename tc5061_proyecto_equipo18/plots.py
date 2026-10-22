@@ -36,7 +36,7 @@ import typer
 
 from tc5061_proyecto_equipo18 import config
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 # Paleta (instancia de referencia validada; slots en orden fijo)
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]  # azul, naranja, aqua
@@ -343,25 +343,71 @@ def grafica_riesgo_por_bloque(
 
 
 # =============================================================================
-# P3 - Clustering
+# Busquedas de hiperparametros (corrida padre)
 # =============================================================================
-def grafica_metrica_por_k(
-    valores: dict[int, float], k_elegido: int, metrica: str, titulo: str
+def grafica_busqueda(
+    resultados: pd.DataFrame, hiperparametros: list[str], metrica: str, sentido: str, titulo: str
 ) -> Figure:
-    """Metrica de calidad del clustering para cada numero de grupos probado."""
-    ks = sorted(valores)
-    figura, ax = plt.subplots(figsize=(6, 3.4))
-    ax.plot(ks, [valores[k] for k in ks], color=SERIES[0], marker="o", markersize=6,
-            markeredgecolor=SUPERFICIE, markeredgewidth=2)  # fmt: skip
-    ax.annotate(f"k = {k_elegido}", (k_elegido, valores[k_elegido]), textcoords="offset points",
-                xytext=(0, 8), ha="center", color=TINTA)  # fmt: skip
-    ax.set_xticks(ks)
-    ax.set_xlabel("Numero de grupos (k)")
-    ax.set_ylabel(metrica)
-    _titulo(figura, titulo)
+    """Metrica de seleccion de cada combinacion de una busqueda.
+
+    Con un solo hiperparametro numerico se dibuja una linea por conjunto (entrenamiento,
+    validacion y prueba, los que existan) y una linea punteada en la mejor combinacion. Con
+    varios, una barra por combinacion con la mejor resaltada.
+    """
+    base = metrica.split("_", 1)[1]
+    series = [
+        f"{conjunto}_{base}"
+        for conjunto in ("entrenamiento", "validacion", "prueba")
+        if f"{conjunto}_{base}" in resultados
+    ]
+    mejor = resultados[metrica].idxmin() if sentido == "min" else resultados[metrica].idxmax()
+    primero = hiperparametros[0]
+    if len(hiperparametros) == 1 and pd.api.types.is_numeric_dtype(resultados[primero]):
+        orden = resultados.sort_values(primero)
+        figura, ax = plt.subplots(figsize=(7, 3.8))
+        for color, serie in zip(SERIES, series):
+            ax.plot(orden[primero], orden[serie], color=color, marker="o", markersize=6,
+                    markeredgecolor=SUPERFICIE, markeredgewidth=2,
+                    label=serie.split("_")[0])  # fmt: skip
+        ax.axvline(resultados.loc[mejor, primero], color=TINTA_SECUNDARIA, linewidth=1,
+                   linestyle="--")  # fmt: skip
+        valores = orden[primero].to_numpy(dtype=float)
+        if valores.min() > 0 and valores.max() / valores.min() >= 10:
+            ax.set_xscale("log")
+        ax.set_xticks(valores, [f"{v:g}" for v in valores])
+        ax.minorticks_off()
+        ax.set_xlabel(primero)
+        ax.set_ylabel(base)
+        ax.legend(loc="best")
+        subtitulo = f"Linea punteada: mejor combinacion por {metrica}"
+    else:
+        # Puntos (no barras): las diferencias entre combinaciones suelen ser pequenas y el eje
+        # se ajusta a ellas; cada punto lleva su valor
+        etiquetas = resultados[hiperparametros].apply(
+            lambda fila: ", ".join(f"{clave}={fila[clave]:g}" if isinstance(fila[clave], float)
+                                   else f"{clave}={fila[clave]}" for clave in hiperparametros),
+            axis=1,
+        )  # fmt: skip
+        colores = [SERIES[1] if indice == mejor else SERIES[0] for indice in resultados.index]
+        figura, ax = plt.subplots(figsize=(8, 0.45 * len(resultados) + 1.4))
+        posiciones = np.arange(len(resultados))
+        ax.scatter(resultados[metrica], posiciones, color=colores, s=60, zorder=3)
+        for posicion, valor in zip(posiciones, resultados[metrica]):
+            ax.annotate(f"{valor:.4f}", (valor, posicion), textcoords="offset points",
+                        xytext=(8, -3), color=TINTA_SECUNDARIA)  # fmt: skip
+        ax.set_yticks(posiciones, etiquetas)
+        ax.invert_yaxis()
+        ax.margins(x=0.25)
+        ax.set_xlabel(metrica)
+        ax.grid(axis="y", visible=False)
+        subtitulo = f"En naranja, la mejor combinacion por {metrica}"
+    _titulo(figura, titulo, subtitulo)
     return figura
 
 
+# =============================================================================
+# P3 - Clustering
+# =============================================================================
 def grafica_mapa_grupos(
     perfiles: pd.DataFrame, titulo: str, columna_grupo: str = "grupo"
 ) -> Figure:

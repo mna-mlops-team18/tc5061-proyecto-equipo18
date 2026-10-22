@@ -1,8 +1,9 @@
 """Feature engineering para las tres preguntas del proyecto MiBici.
 
-Uso (despues de la ingesta)::
+Uso (despues de la ingesta), como punto de entrada ``features`` del MLflow Project::
 
-    python -m tc5061_proyecto_equipo18.features
+    mlflow run . -e features --env-manager local
+    python -m tc5061_proyecto_equipo18.features      # equivalente, sin registrar en MLflow
 
 Flujo::
 
@@ -29,8 +30,9 @@ import typer
 
 from tc5061_proyecto_equipo18 import config
 from tc5061_proyecto_equipo18.dataset import Manifiesto, meses_en_rango
+from tc5061_proyecto_equipo18.seguimiento import registrar_etapa_datos
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 PARTICIONES = ("entrenamiento", "validacion", "prueba")
 
@@ -697,6 +699,20 @@ def main(
     salida_meta.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     logger.success(
         f"Features listas (datos {manifiesto.version}). Metadatos en {salida_meta.name}"
+    )
+    # Con `mlflow run . -e features`, deja los metadatos y los tamanios en ese run
+    registrar_etapa_datos(
+        "datos-features",
+        manifiesto.version,
+        parametros={clave: str(valor) for clave, valor in parametros_features().items()},
+        metricas={
+            "viajes_validos": filtros["viajes_validos"],
+            "estaciones_vigentes": filtros["estaciones_vigentes"],
+            "filas_p1": len(p1),
+            "filas_p2": len(p2),
+            **{f"perfiles_p3_{periodo}": n for periodo, n in meta["filas"]["p3"].items()},
+        },
+        diccionarios={"features_meta.json": meta},
     )
 
 

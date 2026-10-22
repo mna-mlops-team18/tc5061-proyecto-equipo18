@@ -1,25 +1,29 @@
 """P3 - Clustering: que grupos de estaciones comparten patrones de uso y donde se ubican.
 
-Dos runs en MLflow, evaluados con las mismas metricas y periodos:
+Modelos del catalogo ``config.P3_MODELOS``, todos evaluados con las mismas metricas y en el
+mismo espacio que en la entrega 1:
 
-- ``baseline`` (``cuartiles_volumen``): grupos por cuartiles del volumen diario, sin
-  aprendizaje. Es la segmentacion que haria cualquiera sin modelo ("estaciones muy, medio y
-  poco usadas"); el candidato debe aportar algo que el volumen solo no explica.
-- ``candidato`` (``kmeans_pca``): StandardScaler -> PCA -> K-means, con ``k`` elegido entre
-  ``config.P3_K_CANDIDATOS`` por silhouette en entrenamiento.
+- ``cuartiles_volumen`` (baseline): grupos por cuartiles del volumen diario, sin aprendizaje.
+  Es la segmentacion que haria cualquiera sin modelo ("estaciones muy, medio y poco usadas");
+  los demas deben aportar algo que el volumen solo no explica.
+- ``kmeans_pca``: K-means con ``n_clusters`` grupos (la busqueda prueba k de 2 a 8).
 
-Anti-fuga: el escalador, la PCA, los cortes de cuartiles y los centroides se ajustan SOLO con
-los perfiles de entrenamiento. Validacion y prueba solo se asignan al grupo (o corte) mas
-cercano y sirven para medir la calidad y la estabilidad de los grupos en periodos posteriores.
-La ubicacion (latitud, longitud) no entra al clustering: los grupos se forman por uso y despues
-se ubican en el mapa, que es lo que pregunta P3.
+Todos agrupan en el mismo espacio: ``StandardScaler -> PCA`` (``config.P3_VARIANZA_PCA`` de la
+varianza) ajustado solo con entrenamiento. Asi las metricas de todos son comparables.
+
+Anti-fuga: el escalador, la PCA, los cortes de cuartiles y los grupos se ajustan SOLO con los
+perfiles de entrenamiento. Validacion y prueba solo se asignan al grupo (o corte) mas cercano y
+sirven para medir la calidad y la estabilidad de los grupos en periodos posteriores. La
+ubicacion (latitud, longitud) no entra al clustering: los grupos se forman por uso y despues se
+ubican en el mapa, que es lo que pregunta P3.
 
 Las metricas se llaman ``<periodo>_<metrica>`` (por ejemplo ``validacion_silhouette``), igual
 que en P1 y P2.
 
 Uso::
 
-    python -m tc5061_proyecto_equipo18.modeling.train --pregunta P3
+    mlflow run . -e train -P pregunta=p3 -P modelo=kmeans_pca --env-manager local
+    mlflow run . -e search -P pregunta=p3 --env-manager local
 """
 
 from collections.abc import Callable
@@ -39,18 +43,22 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from tc5061_proyecto_equipo18 import config
-from tc5061_proyecto_equipo18.features import PARTICIONES
+from tc5061_proyecto_equipo18.features import PARTICIONES, cargar_metadatos_features
 from tc5061_proyecto_equipo18.modeling.comun import (
-    ROLES,
     cargar_dataset,
+    cronometro,
+    es_baseline,
     iniciar_run,
+    registrar_conjuntos,
+    registrar_costos,
     registrar_figura,
     registrar_metricas,
     registrar_modelo,
+    registrar_tabla,
+    resolver_hiperparametros,
 )
 from tc5061_proyecto_equipo18.plots import (
     grafica_mapa_grupos,
-    grafica_metrica_por_k,
     grafica_perfiles_grupo,
     mapa_html_grupos,
 )
@@ -58,6 +66,7 @@ from tc5061_proyecto_equipo18.plots import (
 PREGUNTA = "P3"
 VARIABLES_RESUMEN = ["log_viajes_dia", "ratio_fin_semana", "balance_neto"]
 COLUMNAS_MAPA = ["estacion_id", "codigo", "nombre", "municipio", "latitud", "longitud"]
+TITULOS = {"cuartiles_volumen": "Cuartiles de volumen", "kmeans_pca": "K-means"}
 
 # Asigna un grupo a cada estacion de un periodo: (perfiles, perfiles transformados) -> grupos
 Asignador = Callable[[pd.DataFrame, np.ndarray], np.ndarray]
@@ -94,9 +103,7 @@ def ajustar_preprocesamiento(entrenamiento: pd.DataFrame, columnas: list[str]) -
     return prep.fit(entrenamiento[columnas])
 
 
-def cortes_cuartiles(
-    entrenamiento: pd.DataFrame, grupos: int = config.P3_GRUPOS_BASELINE
-) -> np.ndarray:
+def cortes_cuartiles(entrenamiento: pd.DataFrame, grupos: int) -> np.ndarray:
     """Cortes de volumen diario (escala log) calculados solo con entrenamiento."""
     cuantiles = np.linspace(0, 1, grupos + 1)[1:-1]
     return entrenamiento["log_viajes_dia"].quantile(cuantiles).to_numpy()
@@ -107,21 +114,12 @@ def asignar_por_cortes(df: pd.DataFrame, cortes: np.ndarray) -> np.ndarray:
     return np.digitize(df["log_viajes_dia"].to_numpy(), cortes)
 
 
-def elegir_k(z_entrenamiento: np.ndarray) -> tuple[int, KMeans, dict[int, float]]:
-    """Ajusta K-means para cada k de ``config.P3_K_CANDIDATOS`` y elige el de mayor silhouette.
-
-    Solo usa entrenamiento. Devuelve el k elegido, su modelo y la silhouette de cada k.
-    """
-    modelos, siluetas = {}, {}
-    for k in config.P3_K_CANDIDATOS:
-        if k >= len(z_entrenamiento):
-            continue
-        modelo = KMeans(n_clusters=k, random_state=config.SEMILLA, **config.P3_HIPERPARAMETROS)
-        modelo.fit(z_entrenamiento)
-        modelos[k] = modelo
-        siluetas[k] = float(silhouette_score(z_entrenamiento, modelo.labels_))
-    k_mejor = max(siluetas, key=siluetas.get)
-    return k_mejor, modelos[k_mejor], siluetas
+def ajustar_agrupador(modelo: str, hiperparametros: dict, z_entrenamiento: np.ndarray):
+    """Ajusta el modelo de grupos en el espacio de entrenamiento y devuelve un estimador con
+    ``predict`` (el que asigna estaciones de cualquier periodo)."""
+    if modelo == "kmeans_pca":
+        return KMeans(**hiperparametros, random_state=config.SEMILLA).fit(z_entrenamiento)
+    raise ValueError(f"P3 no sabe construir el modelo {modelo!r}")
 
 
 # =============================================================================
@@ -153,7 +151,8 @@ def evaluar(
     """Asigna grupos en cada periodo y calcula metricas de calidad y de estabilidad.
 
     - Calidad (``metricas_grupos``) en cada periodo, en el espacio del preprocesamiento de
-      entrenamiento, para que baseline y candidato se comparen igual.
+      entrenamiento, para que todos los modelos se comparen igual.
+    - ``grupos``: numero de grupos distintos asignados en el periodo.
     - ``estabilidad_ari`` (validacion y prueba): Adjusted Rand Index entre el grupo de
       entrenamiento y el asignado en ese periodo, para las estaciones presentes en ambos
       (1 = cada estacion conserva su grupo; 0 = como al azar). Un grupo que cambia cada
@@ -171,6 +170,7 @@ def evaluar(
     for periodo, df in perfiles.items():
         metricas[periodo] = {
             "estaciones": float(len(df)),
+            "grupos": float(len(np.unique(etiquetas[periodo]))),
             **metricas_grupos(z[periodo], etiquetas[periodo]),
         }
         if periodo != "entrenamiento":
@@ -228,15 +228,14 @@ def registrar_evaluacion(
         grafica_perfiles_grupo(entrenamiento, f"{titulo}: perfil horario"), "perfiles_grupo"
     )
     mlflow.log_text(mapa_html_grupos(entrenamiento, titulo), "mapas/mapa_grupos.html")
-    mlflow.log_text(
-        resumen_grupos(perfiles["entrenamiento"], etiquetas["entrenamiento"]).to_csv(index=False),
-        "tablas/resumen_grupos.csv",
+    registrar_tabla(
+        resumen_grupos(perfiles["entrenamiento"], etiquetas["entrenamiento"]), "resumen_grupos"
     )
-    mlflow.log_text(asignaciones.to_csv(index=False), "tablas/asignaciones.csv")
+    registrar_tabla(asignaciones, "asignaciones")
 
 
 def preparar(datos: dict[str, pd.DataFrame]) -> tuple[list[str], Pipeline, dict]:
-    """Variables, preprocesamiento de entrenamiento y parametros comunes a los dos runs."""
+    """Variables, preprocesamiento de entrenamiento y parametros comunes a todos los runs."""
     vacios = [p for p in PARTICIONES if datos[p].empty]
     if vacios:
         raise RuntimeError(f"No hay perfiles de P3 para: {vacios}. Revisa features.")
@@ -250,59 +249,67 @@ def preparar(datos: dict[str, pd.DataFrame]) -> tuple[list[str], Pipeline, dict]
     return columnas, prep, parametros
 
 
-def correr_baseline(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run de la linea base. No registra modelo: es una regla con cortes de entrenamiento."""
-    columnas, prep, parametros = preparar(datos)
-    cortes = cortes_cuartiles(datos["entrenamiento"])
-    parametros |= {
-        "grupos": config.P3_GRUPOS_BASELINE,
-        "cortes_log_viajes_dia": str([round(float(c), 4) for c in cortes]),
-    }
-    with iniciar_run(PREGUNTA, "baseline", "cuartiles_volumen", parametros, meta_features) as run:
-        metricas, asignaciones, etiquetas = evaluar(
-            prep, columnas, datos, lambda df, z: asignar_por_cortes(df, cortes)
-        )
-        registrar_evaluacion(datos, metricas, asignaciones, etiquetas, "Cuartiles de volumen")
-    return run.info.run_id
+def cargar_datos() -> dict[str, pd.DataFrame]:
+    """Perfiles de P3 (los escribe features.py) separados por la columna ``periodo``."""
+    return cargar_dataset(config.DATASET_P3, columna_tiempo=None)
 
 
-def correr_candidato(datos: dict[str, pd.DataFrame], meta_features: dict | None = None) -> str:
-    """Run del candidato: elige k, evalua, registra artefactos y el modelo (prep + K-means)."""
-    columnas, prep, parametros = preparar(datos)
-    k, kmeans, siluetas = elegir_k(prep.transform(datos["entrenamiento"][columnas]))
-    parametros |= {
-        "k": k,
-        "k_candidatos": str(list(config.P3_K_CANDIDATOS)),
-        **{f"kmeans_{clave}": valor for clave, valor in config.P3_HIPERPARAMETROS.items()},
-    }
-    with iniciar_run(PREGUNTA, "candidato", "kmeans_pca", parametros, meta_features) as run:
-        metricas, asignaciones, etiquetas = evaluar(
-            prep, columnas, datos, lambda df, z: kmeans.predict(z)
-        )
-        metricas["entrenamiento"] |= {f"silhouette_k{n}": s for n, s in siluetas.items()}
-        metricas["entrenamiento"]["inercia"] = float(kmeans.inertia_)
-        registrar_evaluacion(datos, metricas, asignaciones, etiquetas, f"K-means (k = {k})")
-        registrar_figura(
-            grafica_metrica_por_k(siluetas, k, "Silhouette", "Silhouette en entrenamiento por k"),
-            "silhouette_por_k",
-        )
-        modelo = Pipeline([("prep", prep), ("kmeans", kmeans)])
-        registrar_modelo(modelo, datos["entrenamiento"][columnas].head(100))
-    return run.info.run_id
-
-
-def entrenar(
-    roles: tuple[str, ...] = ROLES,
+def correr(
+    modelo: str,
+    hiperparametros: dict | None = None,
     datos: dict[str, pd.DataFrame] | None = None,
     meta_features: dict | None = None,
-) -> list[str]:
-    """Punto de entrada que invoca train.py: corre los roles pedidos y devuelve sus run_id.
+    etapa: str | None = None,
+    anidado: bool = False,
+    nombre: str | None = None,
+) -> str:
+    """Agrupa, evalua y registra un run de P3; devuelve su run_id.
 
-    ``datos`` y ``meta_features`` solo se pasan en las pruebas; por defecto se leen del
-    Parquet de P3 (separado por la columna ``periodo``) y de los metadatos de features (que
-    validan la version de los datos).
+    ``hiperparametros`` son los ya resueltos (config.py con los cambios de ``-P``); si no se
+    pasan se usan los de config.py. El baseline no registra modelo (es una regla de cortes);
+    los demas registran ``Pipeline(prep, agrupador)``, que recibe el perfil de una estacion y
+    devuelve su grupo.
     """
+    if hiperparametros is None:
+        hiperparametros = resolver_hiperparametros(PREGUNTA, modelo)
     if datos is None:
-        datos = cargar_dataset(config.DATASET_P3, columna_tiempo=None)
-    corredores = {"baseline": correr_baseline, "candidato": correr_candidato}
-    return [corredores[rol](datos, meta_features) for rol in roles]
+        datos = cargar_datos()
+    meta = meta_features if meta_features is not None else cargar_metadatos_features()
+    columnas, prep, parametros = preparar(datos)
+    titulo = TITULOS.get(modelo, modelo)
+    baseline = es_baseline(PREGUNTA, modelo)
+    if baseline:
+        cortes = cortes_cuartiles(datos["entrenamiento"], hiperparametros["grupos"])
+        parametros["cortes_log_viajes_dia"] = str([round(float(c), 4) for c in cortes])
+
+    with iniciar_run(
+        PREGUNTA, modelo, etapa, hiperparametros, meta, nombre, anidado, parametros
+    ) as run:
+        registrar_conjuntos(
+            datos, PREGUNTA, config.DATASET_P3, columnas, None, meta["data_version"]
+        )
+        if baseline:
+            with cronometro() as inferencia:
+                metricas, asignaciones, etiquetas = evaluar(
+                    prep, columnas, datos, lambda df, z: asignar_por_cortes(df, cortes)
+                )
+            registrar_costos(0.0, inferencia["segundos"], len(asignaciones))
+            registrar_evaluacion(datos, metricas, asignaciones, etiquetas, titulo)
+            return run.info.run_id
+
+        z_entrenamiento = prep.transform(datos["entrenamiento"][columnas])
+        with cronometro() as ajuste:
+            agrupador = ajustar_agrupador(modelo, hiperparametros, z_entrenamiento)
+        with cronometro() as inferencia:
+            metricas, asignaciones, etiquetas = evaluar(
+                prep, columnas, datos, lambda df, z: agrupador.predict(z)
+            )
+        registrar_costos(ajuste["segundos"], inferencia["segundos"], len(asignaciones))
+        if hasattr(agrupador, "inertia_"):
+            metricas["entrenamiento"]["inercia"] = float(agrupador.inertia_)
+        if hasattr(agrupador, "bic"):
+            metricas["entrenamiento"]["bic"] = float(agrupador.bic(z_entrenamiento))
+        registrar_evaluacion(datos, metricas, asignaciones, etiquetas, titulo)
+        modelo_final = Pipeline([("prep", prep), ("agrupador", agrupador)])
+        registrar_modelo(modelo_final, datos["entrenamiento"][columnas].head(100))
+    return run.info.run_id

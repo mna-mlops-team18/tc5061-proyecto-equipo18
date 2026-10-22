@@ -4,13 +4,16 @@ import mlflow
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.metrics import adjusted_rand_score
 
 from tc5061_proyecto_equipo18 import config
-from tc5061_proyecto_equipo18.modeling import comun, p3_clustering, train
+from tc5061_proyecto_equipo18.modeling import busqueda, comun, p3_clustering
 
 META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
 PREFIJOS = ("sal_lab", "lle_lab", "sal_fds", "lle_fds")
 HORAS_PICO = {0: [7, 8, 9], 1: [17, 18, 19], 2: [12, 13, 14]}  # tres tipos de estacion
+# Candidato de la entrega 1; los demas candidatos del catalogo se implementan despues
+CANDIDATOS = ["kmeans_pca"]
 
 
 @pytest.fixture
@@ -45,6 +48,10 @@ def datos_p3() -> dict[str, pd.DataFrame]:
     return comun.separar_particiones(pd.DataFrame(filas), columna_tiempo=None)
 
 
+def artefactos(run_id: str, carpeta: str) -> set[str]:
+    return {a.path for a in mlflow.MlflowClient().list_artifacts(run_id, carpeta)}
+
+
 def test_variables_no_incluyen_ubicacion_ni_identificadores(datos_p3):
     columnas = p3_clustering.columnas_variables(datos_p3["entrenamiento"])
     assert len(columnas) == 4 * 24 + 3
@@ -53,14 +60,16 @@ def test_variables_no_incluyen_ubicacion_ni_identificadores(datos_p3):
 
 
 def test_cortes_del_baseline_salen_solo_de_entrenamiento(datos_p3):
-    cortes = p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"])
-    assert len(cortes) == config.P3_GRUPOS_BASELINE - 1
+    cortes = p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"], 4)
+    assert len(cortes) == 3
 
     # Una estacion de prueba con volumen enorme cae en el grupo mas alto y no mueve los cortes
     extremo = datos_p3["prueba"].assign(log_viajes_dia=100.0)
     grupos = p3_clustering.asignar_por_cortes(extremo, cortes)
-    assert (grupos == config.P3_GRUPOS_BASELINE - 1).all()
-    np.testing.assert_allclose(cortes, p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"]))
+    assert (grupos == 3).all()
+    np.testing.assert_allclose(
+        cortes, p3_clustering.cortes_cuartiles(datos_p3["entrenamiento"], 4)
+    )
 
 
 def test_estabilidad_es_perfecta_si_los_perfiles_no_cambian(datos_p3):
@@ -68,55 +77,67 @@ def test_estabilidad_es_perfecta_si_los_perfiles_no_cambian(datos_p3):
     perfiles["validacion"] = perfiles["entrenamiento"].assign(periodo="validacion")
     columnas = p3_clustering.columnas_variables(perfiles["entrenamiento"])
     prep = p3_clustering.ajustar_preprocesamiento(perfiles["entrenamiento"], columnas)
-    cortes = p3_clustering.cortes_cuartiles(perfiles["entrenamiento"])
+    cortes = p3_clustering.cortes_cuartiles(perfiles["entrenamiento"], 4)
     metricas, asignaciones, _ = p3_clustering.evaluar(
         prep, columnas, perfiles, lambda df, z: p3_clustering.asignar_por_cortes(df, cortes)
     )
     assert metricas["validacion"]["estabilidad_ari"] == pytest.approx(1.0)
+    assert metricas["entrenamiento"]["grupos"] == 4
     assert set(asignaciones["periodo"]) == {"entrenamiento", "validacion", "prueba"}
 
 
-def test_elegir_k_recupera_los_tipos_de_estacion(datos_p3):
+@pytest.mark.parametrize("modelo", CANDIDATOS)
+def test_cada_candidato_recupera_los_tipos_de_estacion(datos_p3, modelo):
     columnas = p3_clustering.columnas_variables(datos_p3["entrenamiento"])
     prep = p3_clustering.ajustar_preprocesamiento(datos_p3["entrenamiento"], columnas)
-    k, _, siluetas = p3_clustering.elegir_k(prep.transform(datos_p3["entrenamiento"][columnas]))
-    assert k == 3
-    assert set(siluetas) == set(config.P3_K_CANDIDATOS)
+    z = prep.transform(datos_p3["entrenamiento"][columnas])
+    hiperparametros = comun.resolver_hiperparametros("P3", modelo)
+    agrupador = p3_clustering.ajustar_agrupador(modelo, hiperparametros, z)
+    tipos = datos_p3["entrenamiento"]["estacion_id"] % 3
+    assert adjusted_rand_score(tipos, agrupador.predict(z)) == pytest.approx(1.0)
 
 
-def test_entrenar_registra_baseline_y_candidato(mlflow_temporal, datos_p3):
-    run_ids = p3_clustering.entrenar(datos=datos_p3, meta_features=META)
-    assert len(run_ids) == 2
-
-    baseline, candidato = (mlflow.get_run(run_id) for run_id in run_ids)
-    for run in (baseline, candidato):
-        assert run.data.params["data_version"] == "abc123def456"
-        assert run.data.tags["pregunta"] == "P3"
-        for periodo in ("entrenamiento", "validacion", "prueba"):
-            for metrica in ("silhouette", "davies_bouldin", "calinski_harabasz"):
-                assert f"{periodo}_{metrica}" in run.data.metrics
-        for periodo in ("validacion", "prueba"):
-            assert f"{periodo}_estabilidad_ari" in run.data.metrics
-    assert baseline.data.params["modelo"] == "cuartiles_volumen"
-    assert baseline.data.tags["rol"] == "baseline"
-    assert candidato.data.params["modelo"] == "kmeans_pca"
-    assert candidato.data.params["k"] == "3"  # tres tipos de estacion bien separados
-
-    cliente = mlflow.MlflowClient()
-    figuras = {a.path for a in cliente.list_artifacts(candidato.info.run_id, "figuras")}
-    for figura in ("mapa_grupos", "perfiles_grupo", "silhouette_por_k"):
-        assert any(figura in ruta for ruta in figuras)
-    tablas = {a.path for a in cliente.list_artifacts(candidato.info.run_id, "tablas")}
-    assert {"tablas/resumen_grupos.csv", "tablas/asignaciones.csv"} <= tablas
-    assert config.ruta_modelo(candidato.info.run_name).exists()
-    assert not config.ruta_modelo(baseline.info.run_name).exists()
+def test_baseline_registra_metricas_sin_modelo(mlflow_temporal, datos_p3):
+    run_id = p3_clustering.correr("cuartiles_volumen", datos=datos_p3, meta_features=META)
+    run = mlflow.get_run(run_id)
+    assert run.data.tags["etapa"] == "baseline" and run.data.params["grupos"] == "4"
+    assert "cortes_log_viajes_dia" in run.data.params
+    for periodo in ("validacion", "prueba"):
+        assert f"{periodo}_estabilidad_ari" in run.data.metrics
+    assert not run.outputs.model_outputs
 
 
-def test_train_invoca_p3_con_el_contrato_de_comun(mlflow_temporal, datos_p3, monkeypatch):
-    """train.py llama ``entrenar(roles)``; P3 debe leer sus datos y metadatos por su cuenta."""
-    monkeypatch.setattr(train, "configurar_mlflow", lambda: "0")
-    monkeypatch.setattr(p3_clustering, "cargar_dataset", lambda *args, **kwargs: datos_p3)
-    monkeypatch.setattr(comun, "cargar_metadatos_features", lambda: META)
-    runs = train.ejecutar(["P3"], ("baseline",))
-    assert len(runs["P3"]) == 1
-    assert mlflow.get_run(runs["P3"][0]).data.tags["rol"] == "baseline"
+@pytest.mark.parametrize("modelo", CANDIDATOS)
+def test_candidato_registra_modelo_mapas_y_tablas(mlflow_temporal, datos_p3, modelo):
+    run_id = p3_clustering.correr(modelo, datos=datos_p3, meta_features=META)
+    run = mlflow.get_run(run_id)
+    assert run.data.tags["etapa"] == "candidato" and run.data.tags["pregunta"] == "P3"
+    for periodo in ("entrenamiento", "validacion", "prueba"):
+        for metrica in ("silhouette", "davies_bouldin", "calinski_harabasz", "grupos"):
+            assert f"{periodo}_{metrica}" in run.data.metrics
+    assert run.data.metrics["entrenamiento_grupos"] == 3
+    assert {"figuras/mapa_grupos.png", "figuras/perfiles_grupo.png"} <= artefactos(
+        run_id, "figuras"
+    )
+    assert {"tablas/resumen_grupos.csv", "tablas/asignaciones.csv"} <= artefactos(run_id, "tablas")
+    assert "mapas/mapa_grupos.html" in artefactos(run_id, "mapas")
+
+    # El modelo registrado recibe el perfil de una estacion y devuelve su grupo
+    (salida,) = run.outputs.model_outputs
+    cargado = mlflow.pyfunc.load_model(f"models:/{salida.model_id}")
+    columnas = p3_clustering.columnas_variables(datos_p3["prueba"])
+    grupos = np.asarray(cargado.predict(datos_p3["prueba"][columnas]))
+    assert len(np.unique(grupos)) == 3
+
+
+def test_busqueda_de_k_con_corridas_anidadas(mlflow_temporal, datos_p3):
+    padre_id = busqueda.ejecutar_busqueda(
+        "p3", datos=datos_p3, meta_features=META, rejilla={"n_clusters": [2, 3, 4]}
+    )
+    padre = mlflow.get_run(padre_id)
+    hijas = mlflow.search_runs(
+        filter_string=f"tags.mlflow.parentRunId = '{padre_id}'", output_format="list"
+    )
+    assert sorted(h.data.params["n_clusters"] for h in hijas) == ["2", "3", "4"]
+    assert padre.data.params["mejor_n_clusters"] == "3"  # los datos tienen tres tipos
+    assert "figuras/busqueda.png" in artefactos(padre_id, "figuras")

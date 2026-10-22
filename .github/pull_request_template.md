@@ -14,13 +14,13 @@
 
 <!-- Comandos que corriste y su resultado, por ejemplo:
 `pytest`, `python -m tc5061_proyecto_equipo18.dataset verify`,
-`python -m tc5061_proyecto_equipo18.modeling.train --pregunta P1 --modelo baseline` -->
+`mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local` -->
 
 ## Lista de verificacion
 
 - [ ] La rama sigue la convencion `tipo/descripcion-corta` y los commits siguen Conventional Commits.
 - [ ] Codigo, documentacion, commits y esta descripcion van sin acentos ni enie (solo ASCII).
-- [ ] No agrega datos de MiBici, modelos serializados, carpetas de MLflow (`mlruns/`, `mlflow.db`) ni credenciales (`.env`).
+- [ ] No agrega datos de MiBici, modelos serializados, carpetas de MLflow (`mlruns/`, `mlartifacts/`, `mlflow.db`) ni credenciales (`.env`).
 - [ ] Las rutas, fechas y semillas nuevas estan en `config.py`, sin repetirse en otros archivos.
 - [ ] Si cambian dependencias, `requirements.txt` mantiene versiones fijas (`==`).
 - [ ] Las funciones nuevas tienen docstring y las variables no usan informacion posterior al momento de la prediccion.
