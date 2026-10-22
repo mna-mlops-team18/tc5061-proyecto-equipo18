@@ -7,6 +7,10 @@ particiones que en la entrega 1:
   pronostico ingenuo estacional; cualquier modelo debe superarlo para justificarse.
 - ``hgb_poisson``: ``HistGradientBoostingRegressor`` con perdida Poisson (las salidas son
   conteos no negativos) sobre las variables de ``features.COLUMNAS_P1``.
+- ``hgb_cuadratico``: el mismo algoritmo con perdida cuadratica, para medir cuanto aporta la
+  perdida Poisson.
+- ``glm_poisson``: modelo lineal generalizado Poisson; hora, dia y mes van en one-hot y el
+  resto de las variables escaladas. Es barato de entrenar y facil de interpretar.
 
 Uso::
 
@@ -16,13 +20,17 @@ Uso::
 
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import PoissonRegressor
 from sklearn.metrics import (
     mean_absolute_error,
     mean_poisson_deviance,
     r2_score,
     root_mean_squared_error,
 )
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from tc5061_proyecto_equipo18 import config
 from tc5061_proyecto_equipo18.features import COLUMNAS_P1, OBJETIVO_P1, cargar_metadatos_features
@@ -40,13 +48,19 @@ from tc5061_proyecto_equipo18.modeling.comun import (
     registrar_modelo,
     resolver_hiperparametros,
 )
-from tc5061_proyecto_equipo18.plots import grafica_error_por_hora, grafica_real_vs_predicho
+from tc5061_proyecto_equipo18.plots import (
+    grafica_error_por_hora,
+    grafica_real_vs_predicho,
+    grafica_residuales,
+)
 
 PREGUNTA = "P1"
 PARTICIONES_EVALUACION = ("validacion", "prueba")
 COLUMNA_BASELINE = "salidas_lag_168h"
 # La devianza Poisson no esta definida para predicciones iguales a 0 (el baseline puede darlas)
 PREDICCION_MINIMA = 1e-6
+# Variables de calendario que el modelo lineal recibe en one-hot (su efecto no es lineal)
+CATEGORICAS_GLM = ["hora_dia", "dia_semana", "mes"]
 
 
 def metricas_regresion(real: np.ndarray, predicho: np.ndarray) -> dict[str, float]:
@@ -84,8 +98,22 @@ def predecir_baseline(datos: pd.DataFrame) -> np.ndarray:
 
 def construir_estimador(modelo: str, hiperparametros: dict):
     """Estimador de scikit-learn sin entrenar para un modelo del catalogo de P1."""
-    if modelo == "hgb_poisson":
+    if modelo in ("hgb_poisson", "hgb_cuadratico"):
         return HistGradientBoostingRegressor(**hiperparametros, random_state=config.SEMILLA)
+    if modelo == "glm_poisson":
+        numericas = [columna for columna in COLUMNAS_P1 if columna not in CATEGORICAS_GLM]
+        preparacion = ColumnTransformer(
+            [
+                ("calendario", OneHotEncoder(handle_unknown="ignore"), CATEGORICAS_GLM),
+                ("numericas", StandardScaler(), numericas),
+            ]
+        )
+        return Pipeline(
+            [
+                ("prep", preparacion),
+                ("glm", PoissonRegressor(**hiperparametros, solver="newton-cholesky")),
+            ]
+        )
     raise ValueError(f"P1 no sabe construir el modelo {modelo!r}")
 
 
@@ -106,6 +134,14 @@ def registrar_evaluacion(datos: dict[str, pd.DataFrame], predicciones: dict[str,
     registrar_figura(
         grafica_real_vs_predicho(validacion, "hora", OBJETIVO_P1, "predicho", "Real vs. predicho"),
         "real_vs_predicho",
+    )
+    registrar_figura(
+        grafica_residuales(
+            validacion[OBJETIVO_P1].to_numpy(dtype=float),
+            validacion["predicho"].to_numpy(dtype=float),
+            "Residuales en validacion",
+        ),
+        "residuales",
     )
     registrar_figura(
         grafica_error_por_hora(validacion, OBJETIVO_P1, "predicho", "Error por hora del dia"),

@@ -1,4 +1,4 @@
-"""Pruebas de P2: metricas, baseline sin fuga y runs completos en MLflow."""
+"""Pruebas de P2: metricas, baseline sin fuga, pesos de clase y runs completos en MLflow."""
 
 import mlflow
 import numpy as np
@@ -11,8 +11,7 @@ from tc5061_proyecto_equipo18.features import COLUMNAS_P2, OBJETIVO_P2
 from tc5061_proyecto_equipo18.modeling import comun, p2_clasificacion
 
 META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
-# Candidato de la entrega 1; los demas candidatos del catalogo se implementan despues
-CANDIDATOS = ["hgb_balanceado"]
+CANDIDATOS = [m for m in config.P2_MODELOS if not config.P2_MODELOS[m].get("baseline")]
 
 
 @pytest.fixture
@@ -82,6 +81,14 @@ def test_probabilidades_modelo_rellena_clases_ausentes():
     probabilidades = p2_clasificacion.probabilidades_modelo(modelo, X)
     assert probabilidades.shape == (40, 3)
     assert (probabilidades[:, 1] == 0).all()
+
+
+def test_peso_riesgo_define_los_pesos_de_clase():
+    assert p2_clasificacion.pesos_clase(10) == {0: 1.0, 1: 10.0, 2: 10.0}
+    hiperparametros = comun.resolver_hiperparametros("P2", "hgb_ponderado", {"peso_riesgo": "3"})
+    estimador = p2_clasificacion.construir_estimador("hgb_ponderado", hiperparametros)
+    assert estimador.class_weight == {0: 1.0, 1: 3.0, 2: 3.0}
+    assert "peso_riesgo" in hiperparametros  # se registra como hiperparametro del run
 
 
 @pytest.mark.parametrize("modelo", CANDIDATOS)

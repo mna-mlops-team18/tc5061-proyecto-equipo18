@@ -227,6 +227,43 @@ def grafica_real_vs_predicho(
     return figura
 
 
+def grafica_residuales(
+    real: np.ndarray, predicho: np.ndarray, titulo: str, n_niveles: int = 20
+) -> Figure:
+    """Residuales (real - predicho): sesgo por nivel de prediccion y su distribucion.
+
+    A la izquierda, el residuo medio y la banda de percentiles 25 a 75 en grupos de igual
+    tamanio segun el valor predicho (un modelo sin sesgo queda centrado en 0). A la derecha, el
+    histograma de residuos, recortado a los percentiles 0.5 y 99.5 para que se lea la forma.
+    """
+    datos = pd.DataFrame({"predicho": np.asarray(predicho, float)})
+    datos["residuo"] = np.asarray(real, float) - datos["predicho"]
+    niveles = pd.qcut(datos["predicho"], q=n_niveles, duplicates="drop")
+    resumen = datos.groupby(niveles, observed=True).agg(
+        predicho=("predicho", "mean"),
+        media=("residuo", "mean"),
+        p25=("residuo", lambda r: r.quantile(0.25)),
+        p75=("residuo", lambda r: r.quantile(0.75)),
+    )
+    figura, (izq, der) = plt.subplots(1, 2, figsize=(11, 3.8))
+    izq.fill_between(resumen["predicho"], resumen["p25"], resumen["p75"], color=SERIES[0],
+                     alpha=0.2, linewidth=0, label="Percentiles 25 a 75")  # fmt: skip
+    izq.plot(resumen["predicho"], resumen["media"], color=SERIES[0], marker="o", markersize=4,
+             label="Residuo medio")  # fmt: skip
+    izq.axhline(0, color=TINTA_SECUNDARIA, linewidth=1)
+    izq.set_xlabel("Valor predicho (promedio del grupo)")
+    izq.set_ylabel("Real - predicho")
+    izq.legend(loc="upper left")
+    limites = datos["residuo"].quantile([0.005, 0.995]).to_numpy()
+    der.hist(datos["residuo"].clip(*limites), bins=60, color=SERIES[0], rwidth=0.85)
+    der.axvline(0, color=TINTA_SECUNDARIA, linewidth=1)
+    der.set_xlabel("Real - predicho")
+    der.set_ylabel("Filas")
+    der.grid(axis="x", visible=False)
+    _titulo(figura, titulo, "Residuo = real - predicho; positivo = el modelo se quedo corto")
+    return figura
+
+
 def grafica_error_por_hora(datos: pd.DataFrame, real: str, predicho: str, titulo: str) -> Figure:
     """Error absoluto medio por hora del dia (donde falla el modelo)."""
     error = (datos[real] - datos[predicho]).abs().groupby(datos["hora_dia"]).mean()

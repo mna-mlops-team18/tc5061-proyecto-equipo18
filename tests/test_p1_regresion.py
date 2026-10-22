@@ -10,8 +10,7 @@ from tc5061_proyecto_equipo18.features import COLUMNAS_P1, OBJETIVO_P1
 from tc5061_proyecto_equipo18.modeling import comun, p1_regresion
 
 META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
-# Candidato de la entrega 1; los demas candidatos del catalogo se implementan despues
-CANDIDATOS = ["hgb_poisson"]
+CANDIDATOS = [m for m in config.P1_MODELOS if not config.P1_MODELOS[m].get("baseline")]
 
 
 @pytest.fixture
@@ -83,7 +82,7 @@ def test_candidato_registra_modelo_figuras_y_conjuntos(mlflow_temporal, datos_p1
     assert run.data.metrics["costo_entrenamiento_seg"] >= 0
     assert run.data.metrics["costo_inferencia_ms_por_1000_filas"] >= 0
     figuras = artefactos(run_id, "figuras")
-    for figura in ("real_vs_predicho", "error_por_hora", "importancias"):
+    for figura in ("real_vs_predicho", "residuales", "error_por_hora", "importancias"):
         assert f"figuras/{figura}.png" in figuras
     contextos = {
         t.value
