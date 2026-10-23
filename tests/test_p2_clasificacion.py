@@ -113,6 +113,8 @@ def test_candidato_registra_modelo_figuras_y_conjuntos(mlflow_temporal, datos_p2
     run = mlflow.get_run(run_id)
     assert run.data.tags["etapa"] == "candidato" and run.data.params["modelo"] == modelo
     assert 0 <= run.data.metrics["validacion_f1_macro"] <= 1
+    assert run.data.metrics["entrenamiento_iteraciones"] >= 1  # tambien la logistica
+    assert run.data.metrics["entrenamiento_sin_convergencia"] in (0, 1)
     assert run.data.metrics["costo_entrenamiento_seg"] >= 0
     figuras = artefactos(run_id, "figuras")
     for figura in ("matriz_confusion", "curvas_pr", "riesgo_por_bloque", "importancias"):
@@ -123,3 +125,12 @@ def test_candidato_registra_modelo_figuras_y_conjuntos(mlflow_temporal, datos_p2
     cargado = mlflow.pyfunc.load_model(f"models:/{salida.model_id}")
     predicho = np.asarray(cargado.predict(datos_p2["prueba"][COLUMNAS_P2]))
     assert set(np.unique(predicho)) <= {0, 1, 2}
+
+
+@pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")  # se provoca
+def test_logistica_sin_convergencia_queda_registrado(mlflow_temporal, datos_p2):
+    hiperparametros = comun.resolver_hiperparametros("P2", "logistica", {"max_iter": "1"})
+    run_id = p2_clasificacion.correr("logistica", hiperparametros, datos_p2, META)
+    metricas = mlflow.get_run(run_id).data.metrics
+    assert metricas["entrenamiento_iteraciones"] == 1
+    assert metricas["entrenamiento_sin_convergencia"] == 1

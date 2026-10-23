@@ -45,12 +45,14 @@ from tc5061_proyecto_equipo18.modeling.comun import (
     iniciar_run,
     muestrear,
     registrar_conjuntos,
+    registrar_convergencia,
     registrar_costos,
     registrar_figura,
     registrar_importancias,
     registrar_metricas,
     registrar_modelo,
     resolver_hiperparametros,
+    vigilar_convergencia,
 )
 from tc5061_proyecto_equipo18.plots import (
     grafica_curvas_pr,
@@ -219,7 +221,7 @@ def correr(
 
         estimador = construir_estimador(modelo, hiperparametros)
         entrenamiento = datos["entrenamiento"]
-        with cronometro() as ajuste:
+        with cronometro() as ajuste, vigilar_convergencia() as avisos:
             estimador.fit(entrenamiento[COLUMNAS_P2], entrenamiento[OBJETIVO_P2])
         with cronometro() as inferencia:
             probabilidades = {
@@ -227,8 +229,7 @@ def correr(
             }
         probabilidades["prueba"] = probabilidades_modelo(estimador, datos["prueba"][COLUMNAS_P2])
         registrar_costos(ajuste["segundos"], inferencia["segundos"], len(datos["validacion"]))
-        if hasattr(estimador, "n_iter_"):  # iteraciones reales con parada temprana
-            registrar_metricas({"iteraciones": np.max(estimador.n_iter_)}, "entrenamiento")
+        registrar_convergencia(estimador, avisos)  # tambien la logistica, que va en un Pipeline
         registrar_evaluacion(datos, probabilidades)
 
         muestra_validacion = muestrear(datos["validacion"], config.P2_FILAS_IMPORTANCIA)

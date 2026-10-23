@@ -9,8 +9,13 @@ particiones que en la entrega 1:
   conteos no negativos) sobre las variables de ``features.COLUMNAS_P1``.
 - ``hgb_cuadratico``: el mismo algoritmo con perdida cuadratica, para medir cuanto aporta la
   perdida Poisson.
-- ``glm_poisson``: modelo lineal generalizado Poisson; hora, dia y mes van en one-hot y el
-  resto de las variables escaladas. Es barato de entrenar y facil de interpretar.
+- ``glm_poisson``: modelo lineal generalizado Poisson; hora, dia y mes van en one-hot, los
+  rezagos y medias de viajes pasan por ``log1p`` y todo lo numerico se escala. Es barato de
+  entrenar y facil de interpretar.
+
+Ademas de las metricas, cada candidato registra cuantas iteraciones uso su ajuste, si
+scikit-learn aviso que no convergio y la fraccion de predicciones negativas (posible con la
+perdida cuadratica; las salidas reales nunca son negativas).
 
 Uso::
 
@@ -30,7 +35,7 @@ from sklearn.metrics import (
     root_mean_squared_error,
 )
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
 from tc5061_proyecto_equipo18 import config
 from tc5061_proyecto_equipo18.features import COLUMNAS_P1, OBJETIVO_P1, cargar_metadatos_features
@@ -41,12 +46,14 @@ from tc5061_proyecto_equipo18.modeling.comun import (
     iniciar_run,
     muestrear,
     registrar_conjuntos,
+    registrar_convergencia,
     registrar_costos,
     registrar_figura,
     registrar_importancias,
     registrar_metricas,
     registrar_modelo,
     resolver_hiperparametros,
+    vigilar_convergencia,
 )
 from tc5061_proyecto_equipo18.plots import (
     grafica_error_por_hora,
@@ -61,6 +68,10 @@ COLUMNA_BASELINE = "salidas_lag_168h"
 PREDICCION_MINIMA = 1e-6
 # Variables de calendario que el modelo lineal recibe en one-hot (su efecto no es lineal)
 CATEGORICAS_GLM = ["hora_dia", "dia_semana", "mes"]
+# Rezagos y medias de viajes: el GLM Poisson tiene enlace log, asi que entran como log1p (un
+# efecto multiplicativo por cada 1 % mas de viajes) en lugar de crudos, que en estaciones con
+# mucha demanda dispararian la prediccion con exp(b * viajes)
+CONTEOS_GLM = [columna for columna in COLUMNAS_P1 if columna.startswith(("salidas_", "llegadas_"))]
 
 
 def metricas_regresion(real: np.ndarray, predicho: np.ndarray) -> dict[str, float]:
@@ -72,6 +83,8 @@ def metricas_regresion(real: np.ndarray, predicho: np.ndarray) -> dict[str, floa
       distinto volumen y estable aunque muchas horas tengan 0 salidas.
     - ``devianza_poisson``: ajuste propio de conteos; es la perdida que optimiza ``hgb_poisson``.
     - ``r2``: fraccion de la variacion explicada.
+    - ``fraccion_negativas``: predicciones menores que 0 (solo posibles con perdida cuadratica);
+      se reportan sin recortar, igual que las devuelve el modelo registrado.
     """
     real = np.asarray(real, dtype=float)
     predicho = np.asarray(predicho, dtype=float)
@@ -84,6 +97,7 @@ def metricas_regresion(real: np.ndarray, predicho: np.ndarray) -> dict[str, floa
             real, np.clip(predicho, PREDICCION_MINIMA, None)
         ),
         "r2": r2_score(real, predicho),
+        "fraccion_negativas": float(np.mean(predicho < 0)),
     }
 
 
@@ -101,11 +115,18 @@ def construir_estimador(modelo: str, hiperparametros: dict):
     if modelo in ("hgb_poisson", "hgb_cuadratico"):
         return HistGradientBoostingRegressor(**hiperparametros, random_state=config.SEMILLA)
     if modelo == "glm_poisson":
-        numericas = [columna for columna in COLUMNAS_P1 if columna not in CATEGORICAS_GLM]
+        otras = [c for c in COLUMNAS_P1 if c not in CATEGORICAS_GLM and c not in CONTEOS_GLM]
+        conteos = Pipeline(
+            [
+                ("log1p", FunctionTransformer(np.log1p, feature_names_out="one-to-one")),
+                ("escala", StandardScaler()),
+            ]
+        )
         preparacion = ColumnTransformer(
             [
                 ("calendario", OneHotEncoder(handle_unknown="ignore"), CATEGORICAS_GLM),
-                ("numericas", StandardScaler(), numericas),
+                ("conteos", conteos, CONTEOS_GLM),
+                ("numericas", StandardScaler(), otras),
             ]
         )
         return Pipeline(
@@ -193,7 +214,7 @@ def correr(
         # memoria sin perder estaciones ni horas: con 18 meses hay mas filas de las necesarias.
         muestra = muestrear(datos["entrenamiento"], config.P1_MAX_FILAS_ENTRENAMIENTO)
         estimador = construir_estimador(modelo, hiperparametros)
-        with cronometro() as entrenamiento:
+        with cronometro() as entrenamiento, vigilar_convergencia() as avisos:
             estimador.fit(muestra[COLUMNAS_P1], muestra[OBJETIVO_P1])
         with cronometro() as inferencia:
             predicciones = {"validacion": estimador.predict(datos["validacion"][COLUMNAS_P1])}
@@ -201,8 +222,7 @@ def correr(
         registrar_costos(
             entrenamiento["segundos"], inferencia["segundos"], len(datos["validacion"])
         )
-        if hasattr(estimador, "n_iter_"):  # iteraciones reales con parada temprana
-            registrar_metricas({"iteraciones": estimador.n_iter_}, "entrenamiento")
+        registrar_convergencia(estimador, avisos)  # tambien el GLM, que va en un Pipeline
         registrar_evaluacion(datos, predicciones)
 
         muestra_validacion = muestrear(datos["validacion"], config.P1_FILAS_IMPORTANCIA)

@@ -52,7 +52,9 @@ import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import requests
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.inspection import permutation_importance
+from sklearn.pipeline import Pipeline
 import skops.io
 
 from tc5061_proyecto_equipo18 import config
@@ -543,6 +545,36 @@ def cronometro() -> Iterator[dict]:
         yield medida
     finally:
         medida["segundos"] = time.perf_counter() - inicio
+
+
+@contextmanager
+def vigilar_convergencia() -> Iterator[list]:
+    """Junta los avisos que salgan al entrenar, para registrar en MLflow si hubo uno de no
+    convergencia (scikit-learn solo los muestra en la terminal).
+
+    ``with vigilar_convergencia() as avisos: estimador.fit(...)``; al salir del bloque los avisos
+    se vuelven a mostrar igual que antes.
+    """
+    with warnings.catch_warnings(record=True) as avisos:
+        warnings.simplefilter("always")
+        yield avisos
+    for aviso in avisos:
+        warnings.warn_explicit(aviso.message, aviso.category, aviso.filename, aviso.lineno)
+
+
+def registrar_convergencia(estimador, avisos: list) -> None:
+    """Registra cuantas iteraciones uso el ajuste y si scikit-learn aviso que no convergio.
+
+    En un ``Pipeline`` se lee el ultimo paso (el modelo). ``entrenamiento_iteraciones`` es el
+    maximo de ``n_iter_`` (la logistica da uno por clase) y ``entrenamiento_sin_convergencia``
+    vale 1 si hubo un ``ConvergenceWarning`` (llego a ``max_iter`` sin converger) y 0 si no.
+    """
+    final = estimador[-1] if isinstance(estimador, Pipeline) else estimador
+    sin_convergencia = any(issubclass(aviso.category, ConvergenceWarning) for aviso in avisos)
+    metricas = {"sin_convergencia": float(sin_convergencia)}
+    if getattr(final, "n_iter_", None) is not None:
+        metricas["iteraciones"] = float(np.max(final.n_iter_))
+    registrar_metricas(metricas, "entrenamiento")
 
 
 def registrar_costos(

@@ -47,6 +47,21 @@ def test_metricas_regresion():
     assert metricas["wape"] == pytest.approx(2 / 6)
     # Una prediccion de 0 no rompe la devianza Poisson
     assert np.isfinite(metricas["devianza_poisson"])
+    assert metricas["fraccion_negativas"] == 0
+    # Las negativas se cuentan y no se recortan (son las que devuelve el modelo)
+    negativas = p1_regresion.metricas_regresion(np.array([1, 1]), np.array([-1, 1]))
+    assert negativas["fraccion_negativas"] == 0.5 and negativas["mae"] == 1.0
+
+
+def test_glm_usa_log1p_en_los_conteos():
+    hiperparametros = comun.resolver_hiperparametros("P1", "glm_poisson")
+    preparacion = p1_regresion.construir_estimador("glm_poisson", hiperparametros)["prep"]
+    partes = {nombre: columnas for nombre, _, columnas in preparacion.transformers}
+    assert partes["conteos"] == p1_regresion.CONTEOS_GLM
+    assert "salidas_lag_168h" in partes["conteos"] and "capacidad" in partes["numericas"]
+    # Cada variable entra una sola vez
+    todas = [c for columnas in partes.values() for c in columnas]
+    assert sorted(todas) == sorted(COLUMNAS_P1)
 
 
 def test_baseline_es_el_rezago_semanal(datos_p1):
@@ -79,6 +94,9 @@ def test_candidato_registra_modelo_figuras_y_conjuntos(mlflow_temporal, datos_p1
     run = mlflow.get_run(run_id)
     assert run.data.tags["etapa"] == "candidato" and run.data.params["modelo"] == modelo
     assert run.data.metrics["validacion_mae"] >= 0
+    assert run.data.metrics["entrenamiento_iteraciones"] >= 1  # tambien el GLM del Pipeline
+    assert run.data.metrics["entrenamiento_sin_convergencia"] in (0, 1)
+    assert 0 <= run.data.metrics["validacion_fraccion_negativas"] <= 1
     assert run.data.metrics["costo_entrenamiento_seg"] >= 0
     assert run.data.metrics["costo_inferencia_ms_por_1000_filas"] >= 0
     figuras = artefactos(run_id, "figuras")
@@ -105,3 +123,12 @@ def test_hiperparametros_cambiados_quedan_en_el_run(mlflow_temporal, datos_p1):
     assert run.data.params["max_iter"] == "20"
     assert run.info.run_name == "p1-candidato-hgb_poisson-max_iter20"
     assert run.data.metrics["entrenamiento_iteraciones"] <= 20
+
+
+@pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")  # se provoca
+def test_glm_sin_convergencia_queda_registrado(mlflow_temporal, datos_p1):
+    hiperparametros = comun.resolver_hiperparametros("P1", "glm_poisson", {"max_iter": "1"})
+    run_id = p1_regresion.correr("glm_poisson", hiperparametros, datos_p1, META)
+    metricas = mlflow.get_run(run_id).data.metrics
+    assert metricas["entrenamiento_iteraciones"] == 1
+    assert metricas["entrenamiento_sin_convergencia"] == 1
