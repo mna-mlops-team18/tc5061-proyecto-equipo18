@@ -360,7 +360,7 @@ def test_mlproject_declara_entorno_y_puntos_de_entrada_parametrizados():
     proyecto = _project_spec.load_project(str(config.PROJ_ROOT))
     assert proyecto.env_type == "python_env"
     assert proyecto.env_config_path.endswith("python_env.yaml")
-    for nombre in ("ingest", "features", "train", "search"):
+    for nombre in ("ingest", "features", "train", "search", "register"):
         assert proyecto.get_entry_point(nombre) is not None
 
     entrenamiento = proyecto.get_entry_point("train")

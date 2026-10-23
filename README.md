@@ -86,6 +86,7 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
         |-- p3_clustering.py      <- P3: modelos del catalogo de config.py (clustering)
         |-- train.py              <- Entry point train: un modelo del catalogo por corrida
         |-- busqueda.py           <- Entry point search: busqueda con nested runs
+        |-- registro.py           <- Entry point register: Model Registry con aliases champion/challenger
         +-- predict.py            <- Plantilla de inferencia (siguientes entregas)
 ```
 
@@ -170,9 +171,10 @@ $env:MLFLOW_EXPERIMENT_NAME = "mibici-equipo18"
 ```
 
 **MLflow Project.** `MLproject` tiene los puntos de entrada `ingest`, `features`, `train`
-(`pregunta`, `modelo` y cualquier hiperparametro con `-P`) y `search` (busqueda con nested
-runs). Los modelos, hiperparametros por defecto y rejillas de busqueda viven en `config.py`
-(`P1_MODELOS`, `P2_MODELOS`, `P3_MODELOS` y `P*_BUSQUEDA`):
+(`pregunta`, `modelo` y cualquier hiperparametro con `-P`), `search` (busqueda con nested
+runs) y `register` (Model Registry, abajo). Los modelos, hiperparametros por defecto y
+rejillas de busqueda viven en `config.py` (`P1_MODELOS`, `P2_MODELOS`, `P3_MODELOS` y
+`P*_BUSQUEDA`):
 
 ```bash
 mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local
@@ -186,6 +188,42 @@ parametros (semilla, features, hiperparametros); metricas con el conjunto en el 
 (`validacion_mae`, `prueba_f1_macro`, ...) y de costo; y artefactos en `config/`, `datos/`,
 `figuras/` (mas `tablas/` y `mapas/` en P3), el modelo con firma y los conjuntos de datos con
 `mlflow.log_input`. La propuesta de la entrega 1 esta en `reports/propuesta_entrega1.md`.
+
+**Model Registry y ciclo de vida.** El modelo elegido de cada pregunta se registra con el
+punto de entrada `register` (`modeling/registro.py`) en un modelo con nombre fijo
+(`config.MODELOS_REGISTRADOS`):
+
+| Pregunta | Modelo registrado |
+|---|---|
+| P1 | `mibici-equipo18-p1-demanda` |
+| P2 | `mibici-equipo18-p2-riesgo` |
+| P3 | `mibici-equipo18-p3-grupos` |
+
+```bash
+mlflow run . -e register -P pregunta=p1 --env-manager local                            # o: make register PREGUNTA=p1
+mlflow run . -e register -P pregunta=p2 -P run_id=<run elegido> --env-manager local
+mlflow run . -e register -P pregunta=p3 -P challenger_run_id=ninguno --env-manager local
+```
+
+Usamos **aliases**, no etapas: las etapas (Staging, Production) estan obsoletas desde MLflow
+2.9 y los aliases son el esquema vigente. `@champion` es la version en produccion y
+`@challenger` la siguiente mejor, que se puede evaluar en paralelo antes de promoverla.
+Promover es mover el alias; quien consume el modelo siempre usa la misma URI:
+
+```python
+import mlflow
+modelo = mlflow.pyfunc.load_model("models:/mibici-equipo18-p1-demanda@champion")
+```
+
+Como se elige: solo cuentan runs con modelo (etapa `candidato` o `busqueda`) lanzados con
+`mlflow run` desde un arbol de trabajo limpio y con la misma `data_version` que el baseline,
+ordenados por la metrica de `config.METRICAS_SELECCION`. Sin `-P run_id`, el champion es el
+mejor y el challenger el siguiente con otra configuracion; con `-P run_id` el equipo fija el
+champion (por ejemplo, uno mas estable o mas barato) y `-P challenger_run_id` fija o quita
+(`ninguno`) el challenger. Un champion que no mejora al baseline se rechaza. Cada version
+guarda su linaje en etiquetas y descripcion (experimento, run de origen, `git_commit`,
+`data_version`, metrica contra el baseline y comando para reproducirlo), y el comando
+verifica que `models:/<nombre>@champion` se carga y predice antes de terminar.
 
 ## Flujo de trabajo con Git y GitHub
 
