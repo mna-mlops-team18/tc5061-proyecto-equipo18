@@ -87,6 +87,11 @@ train:
 search:
 	mlflow run . -e search -P pregunta=$(PREGUNTA) --env-manager local
 
+## Register the chosen model of one question with the champion/challenger aliases, e.g. make register PREGUNTA=p1
+.PHONY: register
+register:
+	mlflow run . -e register -P pregunta=$(PREGUNTA) --env-manager local
+
 ## Run the tests
 .PHONY: test
 test:

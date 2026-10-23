@@ -1,4 +1,5 @@
-# MLflow Project del equipo 18: ingesta, variables, entrenamiento y busqueda con un solo comando.
+# MLflow Project del equipo 18: ingesta, variables, entrenamiento, busqueda y registro con un solo
+# comando.
 #
 # Antes (ver README > Servidor de tracking): servidor local levantado en otra terminal y, en la
 # terminal donde se corre `mlflow run`:
@@ -12,6 +13,8 @@
 #   mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local
 #   mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson -P learning_rate=0.05 --env-manager local
 #   mlflow run . -e search -P pregunta=p2 --env-manager local
+#   mlflow run . -e register -P pregunta=p1 --env-manager local
+#   mlflow run . -e register -P pregunta=p2 -P run_id=<run elegido> --env-manager local
 #
 # - Rutas, fechas, cortes, semilla, modelos e hiperparametros por defecto viven en config.py
 #   (P1_MODELOS, P2_MODELOS, P3_MODELOS y P*_BUSQUEDA); aqui no se repite ninguno.
@@ -45,3 +48,10 @@ entry_points:
     parameters:
       pregunta: {type: string}
     command: "python -m tc5061_proyecto_equipo18.modeling.busqueda --pregunta {pregunta}"
+
+  # Model Registry: registra el modelo elegido y le asigna los aliases champion y challenger.
+  # Opcionales: -P run_id=<run> (champion; si no, el mejor) y -P challenger_run_id=<run|ninguno>.
+  register:
+    parameters:
+      pregunta: {type: string}
+    command: "python -m tc5061_proyecto_equipo18.modeling.registro --pregunta {pregunta}"
