@@ -12,8 +12,8 @@ from tc5061_proyecto_equipo18.modeling import busqueda, comun, p3_clustering
 META = {"data_version": "abc123def456", "parametros": {"mes_inicio": "2024-10"}}
 PREFIJOS = ("sal_lab", "lle_lab", "sal_fds", "lle_fds")
 HORAS_PICO = {0: [7, 8, 9], 1: [17, 18, 19], 2: [12, 13, 14]}  # tres tipos de estacion
-# Candidato de la entrega 1; los demas candidatos del catalogo se implementan despues
-CANDIDATOS = ["kmeans_pca"]
+# Candidatos ya implementados; los demas del catalogo se agregan al implementarse
+CANDIDATOS = ["kmeans_pca", "gmm_pca", "jerarquico_pca"]
 
 
 @pytest.fixture
