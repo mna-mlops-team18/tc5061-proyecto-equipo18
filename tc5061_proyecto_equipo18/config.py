@@ -335,7 +335,8 @@ P2_MODELOS = {
         "hiperparametros": {"C": 1.0, "peso_riesgo": 5.0, "max_iter": 1000},
     },
 }
-P2_BUSQUEDA = {"modelo": "hgb_ponderado", "rejilla": {"peso_riesgo": [1.0, 3.0, 10.0, 30.0]}}
+# La rejilla incluye el 5 por defecto de hgb_ponderado: asi el candidato es un punto de la busqueda
+P2_BUSQUEDA = {"modelo": "hgb_ponderado", "rejilla": {"peso_riesgo": [1.0, 3.0, 5.0, 10.0, 30.0]}}
 
 # =============================================================================
 # P3 - Clustering: grupos de estaciones con patrones de uso parecidos

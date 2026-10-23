@@ -10,15 +10,22 @@ en la entrega 1:
   vaciarse a esta hora").
 - ``hgb_balanceado``: ``HistGradientBoostingClassifier`` con pesos de clase balanceados (el
   candidato de la entrega 1).
+- ``hgb_ponderado``: el mismo algoritmo con un peso ``peso_riesgo`` para las dos clases de
+  riesgo. En la entrega 1 los pesos balanceados detectaban casi todos los riesgos pero con
+  muchas alertas falsas; un peso intermedio cambia ese equilibrio.
+- ``logistica``: regresion logistica multinomial con variables escaladas y el mismo
+  ``peso_riesgo``: referencia lineal, barata e interpretable.
 
 Uso::
 
-    mlflow run . -e train -P pregunta=p2 -P modelo=hgb_balanceado --env-manager local
+    mlflow run . -e train -P pregunta=p2 -P modelo=hgb_ponderado -P peso_riesgo=10 --env-manager local
+    mlflow run . -e search -P pregunta=p2 --env-manager local
 """
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
     balanced_accuracy_score,
@@ -26,6 +33,8 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from tc5061_proyecto_equipo18 import config
 from tc5061_proyecto_equipo18.features import COLUMNAS_P2, OBJETIVO_P2, cargar_metadatos_features
@@ -36,12 +45,14 @@ from tc5061_proyecto_equipo18.modeling.comun import (
     iniciar_run,
     muestrear,
     registrar_conjuntos,
+    registrar_convergencia,
     registrar_costos,
     registrar_figura,
     registrar_importancias,
     registrar_metricas,
     registrar_modelo,
     resolver_hiperparametros,
+    vigilar_convergencia,
 )
 from tc5061_proyecto_equipo18.plots import (
     grafica_curvas_pr,
@@ -108,10 +119,34 @@ def probabilidades_modelo(modelo, X: pd.DataFrame) -> np.ndarray:
     return probabilidades
 
 
+def pesos_clase(peso_riesgo: float) -> dict[int, float]:
+    """Peso de cada clase: 1 para "sin riesgo" y ``peso_riesgo`` para vaciado y llenado."""
+    return {0: 1.0, 1: float(peso_riesgo), 2: float(peso_riesgo)}
+
+
 def construir_estimador(modelo: str, hiperparametros: dict):
     """Estimador de scikit-learn sin entrenar para un modelo del catalogo de P2."""
+    hiperparametros = dict(hiperparametros)
     if modelo == "hgb_balanceado":
         return HistGradientBoostingClassifier(**hiperparametros, random_state=config.SEMILLA)
+    if modelo == "hgb_ponderado":
+        pesos = pesos_clase(hiperparametros.pop("peso_riesgo"))
+        return HistGradientBoostingClassifier(
+            **hiperparametros, class_weight=pesos, random_state=config.SEMILLA
+        )
+    if modelo == "logistica":
+        pesos = pesos_clase(hiperparametros.pop("peso_riesgo"))
+        return Pipeline(
+            [
+                ("escala", StandardScaler()),
+                (
+                    "logistica",
+                    LogisticRegression(
+                        **hiperparametros, class_weight=pesos, random_state=config.SEMILLA
+                    ),
+                ),
+            ]
+        )
     raise ValueError(f"P2 no sabe construir el modelo {modelo!r}")
 
 
@@ -186,7 +221,7 @@ def correr(
 
         estimador = construir_estimador(modelo, hiperparametros)
         entrenamiento = datos["entrenamiento"]
-        with cronometro() as ajuste:
+        with cronometro() as ajuste, vigilar_convergencia() as avisos:
             estimador.fit(entrenamiento[COLUMNAS_P2], entrenamiento[OBJETIVO_P2])
         with cronometro() as inferencia:
             probabilidades = {
@@ -194,8 +229,7 @@ def correr(
             }
         probabilidades["prueba"] = probabilidades_modelo(estimador, datos["prueba"][COLUMNAS_P2])
         registrar_costos(ajuste["segundos"], inferencia["segundos"], len(datos["validacion"]))
-        if hasattr(estimador, "n_iter_"):  # iteraciones reales con parada temprana
-            registrar_metricas({"iteraciones": np.max(estimador.n_iter_)}, "entrenamiento")
+        registrar_convergencia(estimador, avisos)  # tambien la logistica, que va en un Pipeline
         registrar_evaluacion(datos, probabilidades)
 
         muestra_validacion = muestrear(datos["validacion"], config.P2_FILAS_IMPORTANCIA)
