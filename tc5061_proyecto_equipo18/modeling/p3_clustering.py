@@ -7,6 +7,11 @@ mismo espacio que en la entrega 1:
   Es la segmentacion que haria cualquiera sin modelo ("estaciones muy, medio y poco usadas");
   los demas deben aportar algo que el volumen solo no explica.
 - ``kmeans_pca``: K-means con ``n_clusters`` grupos (la busqueda prueba k de 2 a 8).
+- ``gmm_pca``: mezcla gaussiana con ``n_components`` grupos; admite grupos de forma y tamanio
+  distintos y ademas del grupo da su probabilidad (se asigna el de mayor probabilidad).
+- ``jerarquico_pca``: aglomerativo (Ward). No tiene ``predict``, asi que los grupos se ajustan
+  con entrenamiento y las estaciones de cualquier periodo van al centroide mas cercano
+  (``NearestCentroid``); ese es el modelo que se guarda.
 
 Todos agrupan en el mismo espacio: ``StandardScaler -> PCA`` (``config.P3_VARIANZA_PCA`` de la
 varianza) ajustado solo con entrenamiento. Asi las metricas de todos son comparables.
@@ -31,7 +36,7 @@ from collections.abc import Callable
 import mlflow
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
+from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import (
     adjusted_rand_score,
@@ -39,6 +44,8 @@ from sklearn.metrics import (
     davies_bouldin_score,
     silhouette_score,
 )
+from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import NearestCentroid
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -66,7 +73,12 @@ from tc5061_proyecto_equipo18.plots import (
 PREGUNTA = "P3"
 VARIABLES_RESUMEN = ["log_viajes_dia", "ratio_fin_semana", "balance_neto"]
 COLUMNAS_MAPA = ["estacion_id", "codigo", "nombre", "municipio", "latitud", "longitud"]
-TITULOS = {"cuartiles_volumen": "Cuartiles de volumen", "kmeans_pca": "K-means"}
+TITULOS = {
+    "cuartiles_volumen": "Cuartiles de volumen",
+    "kmeans_pca": "K-means",
+    "gmm_pca": "Mezcla gaussiana",
+    "jerarquico_pca": "Jerarquico (Ward)",
+}
 
 # Asigna un grupo a cada estacion de un periodo: (perfiles, perfiles transformados) -> grupos
 Asignador = Callable[[pd.DataFrame, np.ndarray], np.ndarray]
@@ -119,6 +131,13 @@ def ajustar_agrupador(modelo: str, hiperparametros: dict, z_entrenamiento: np.nd
     ``predict`` (el que asigna estaciones de cualquier periodo)."""
     if modelo == "kmeans_pca":
         return KMeans(**hiperparametros, random_state=config.SEMILLA).fit(z_entrenamiento)
+    if modelo == "gmm_pca":
+        return GaussianMixture(**hiperparametros, random_state=config.SEMILLA).fit(z_entrenamiento)
+    if modelo == "jerarquico_pca":
+        # El aglomerativo solo etiqueta los puntos con que se ajusta; NearestCentroid aprende el
+        # centroide de cada grupo y asigna cualquier estacion nueva al mas cercano.
+        etiquetas = AgglomerativeClustering(**hiperparametros).fit_predict(z_entrenamiento)
+        return NearestCentroid().fit(z_entrenamiento, etiquetas)
     raise ValueError(f"P3 no sabe construir el modelo {modelo!r}")
 
 
