@@ -134,3 +134,30 @@ def test_logistica_sin_convergencia_queda_registrado(mlflow_temporal, datos_p2):
     metricas = mlflow.get_run(run_id).data.metrics
     assert metricas["entrenamiento_iteraciones"] == 1
     assert metricas["entrenamiento_sin_convergencia"] == 1
+
+
+# =============================================================================
+# Casos limite
+# =============================================================================
+def test_baseline_sin_historia_de_riesgo_predice_sin_riesgo():
+    datos = pd.DataFrame(
+        {"frac_vaciado_mismo_bloque_7d": [0.0, 0.7], "frac_llenado_mismo_bloque_7d": [0.0, 0.6]}
+    )
+    probabilidades = p2_clasificacion.probabilidades_baseline(datos)
+    np.testing.assert_allclose(probabilidades[0], [1, 0, 0])
+    # Si las frecuencias suman mas de 1, "sin riesgo" se recorta a 0 (nunca negativo)
+    assert probabilidades[1, 0] == 0 and np.argmax(probabilidades[1]) == 1
+
+
+def test_metricas_si_el_modelo_nunca_avisa_riesgo():
+    """Un modelo que siempre dice "sin riesgo": recall 0 y sin errores por dividir entre 0."""
+    real = np.array([0, 0, 1, 2])
+    metricas = p2_clasificacion.metricas_clasificacion(real, np.tile([1.0, 0, 0], (4, 1)))
+    assert metricas["recall_vaciado"] == metricas["recall_llenado"] == 0
+    assert metricas["precision_vaciado"] == 0
+    assert 0 <= metricas["f1_macro"] < 1
+
+
+def test_construir_estimador_desconocido_falla_con_mensaje_claro():
+    with pytest.raises(ValueError, match="no sabe construir"):
+        p2_clasificacion.construir_estimador("svm", {})
