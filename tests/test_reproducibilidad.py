@@ -22,6 +22,9 @@ CANDIDATOS = {
     pregunta: [m for m, spec in config.MODELOS[pregunta].items() if not spec.get("baseline")]
     for pregunta in ("P1", "P2", "P3")
 }
+# Modelos sin nada aleatorio (no tienen random_state). Se listan aparte para que la prueba de
+# semillas no pase en vacio: all() sobre una lista vacia siempre es True.
+MODELOS_DETERMINISTAS = {"glm_poisson"}
 
 
 # =============================================================================
@@ -121,8 +124,12 @@ def test_estimadores_de_p1_y_p2_usan_la_semilla_del_proyecto(modulo, pregunta, m
     estimador = modulo.construir_estimador(
         modelo, comun.resolver_hiperparametros(pregunta, modelo)
     )
-    # El GLM Poisson es determinista y no tiene random_state; los demas deben usar la semilla
-    assert all(valor == config.SEMILLA for valor in semillas(estimador).values())
+    valores = list(semillas(estimador).values())
+    if modelo in MODELOS_DETERMINISTAS:
+        assert valores == [], f"{modelo} tiene random_state: quitalo de MODELOS_DETERMINISTAS"
+    else:
+        assert valores, f"{modelo} no tiene ningun random_state"
+        assert all(valor == config.SEMILLA for valor in valores)
 
 
 @pytest.mark.parametrize("modelo", ["kmeans_pca", "gmm_pca"])
