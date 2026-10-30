@@ -49,6 +49,10 @@ FEATURES_META = PROCESSED_DATA_DIR / "features_meta.json"
 MANIFIESTO_DATOS = REFERENCES_DIR / "manifiesto_datos.json"
 RESUMEN_DATOS_MD = REPORTS_DIR / "resumen_datos.md"
 RESULTADOS_ENTREGA2_MD = REPORTS_DIR / "resultados_entrega2.md"
+# Validacion de datos con DeepChecks: los HTML (con filas de datos) se ignoran en Git,
+# el resumen solo tiene metadatos y si se versiona
+VALIDACION_DIR = REPORTS_DIR / "validacion"
+RESUMEN_VALIDACION_MD = VALIDACION_DIR / "resumen_validacion.md"
 EDA_FIGURAS_DIR = FIGURES_DIR / "eda"
 # Archivos que cada run guarda en config/ para poder reproducirlo (rutas relativas a la raiz)
 ARCHIVOS_CONFIGURACION = (
