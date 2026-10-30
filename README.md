@@ -225,6 +225,149 @@ guarda su linaje en etiquetas y descripcion (experimento, run de origen, `git_co
 `data_version`, metrica contra el baseline y comando para reproducirlo), y el comando
 verifica que `models:/<nombre>@champion` se carga y predice antes de terminar.
 
+## Validacion de datos
+
+La validacion revisa los datasets procesados de P1, P2 y P3 (`data/processed/`) con
+DeepChecks 0.19.1, no los CSV crudos. Vive en la carpeta `validacion_datos/`, fuera del
+paquete y de `tests/`, y corre en un ambiente propio.
+
+### Por que un ambiente aparte
+
+DeepChecks 0.19.1 no se importa con el stack fijado en `requirements.txt` (Python 3.14,
+NumPy 2, pandas 3, scikit-learn 1.9). Se comprobaron tres causas:
+
+1. Importa `pkg_resources`, que las versiones recientes de `setuptools` ya no incluyen.
+2. Su modulo tabular pide a scikit-learn el scorer `max_error`, que ya no existe.
+3. Usa `np.Inf`, eliminado en NumPy 2.
+
+Se consideraron tres opciones:
+
+| Opcion | Idea | Decision y razon |
+|---|---|---|
+| **A. Ambiente aparte** | DeepChecks solo lee los Parquet; nunca necesita los modelos. Python 3.12 con su propio `requirements-validacion.txt`. | **Elegida.** Aisla el problema sin tocar nada de lo ya entregado. |
+| B. Bajar versiones de todo el proyecto | Mover el proyecto a NumPy, pandas y scikit-learn anteriores. | Descartada. Los modelos registrados en la semana 6, sus firmas y la afirmacion de reproducir desde un clon limpio dependen de las versiones actuales; habria que rehacer esa semana para poder usar una herramienta de revision. |
+| C. Parchar al importar | Definir en tiempo de ejecucion los nombres que faltan (`pkg_resources`, `max_error`, `np.Inf`). | Descartada. Una herramienta de validacion con parches propios no es confiable ni facil de explicar a una auditoria: no sabriamos si un resultado es del check o del parche. |
+
+Costos de A, y como se contienen:
+
+- **Dos copias de la definicion de los datos.** `validacion_datos/contrato.py` es pandas puro
+  y repite las listas de variables y la funcion de particion de `features.py`, que no se puede
+  importar en el ambiente 3.12 (arrastra `mlflow`). La prueba `tests/test_contrato_validacion.py`
+  corre en el ambiente principal, sin datos, y falla si alguna de las dos copias cambia sola.
+- **pyarrow queda por debajo de 21.** pyarrow 21 o mayor exige NumPy 2 y DeepChecks necesita
+  `numpy<2`. pandas 2.2 lee sin problema los Parquet escritos con pandas 3 (`hora` y
+  `bloque_inicio` llegan como `datetime64[ms]`).
+- **`pytest` del ambiente principal no ve estas pruebas** (`testpaths = ["tests"]`).
+
+### Crear el ambiente
+
+Requiere [uv](https://docs.astral.sh/uv/) (descarga Python 3.12 si no esta instalado).
+
+```bash
+make venv-validacion       # uv venv .venv-validacion --python 3.12 + instala requirements-validacion.txt
+```
+
+En Windows (PowerShell), sin `make`:
+
+```powershell
+py -3.12 -m venv .venv-validacion
+.venv-validacion\Scripts\python -m pip install -r requirements-validacion.txt
+```
+
+### Correr la validacion
+
+Necesita los datos y las variables (`make data` y `make features`). Se corre desde la raiz del
+repo; el ambiente no instala el paquete, solo importa `config.py`.
+
+```bash
+make validate              # exige datos: si faltan, falla
+```
+
+Equivale a `VALIDACION_REQUIERE_DATOS=1 .venv-validacion/bin/python -m pytest validacion_datos -rs`.
+En Windows:
+
+```powershell
+$env:VALIDACION_REQUIERE_DATOS = "1"
+.venv-validacion\Scripts\python -m pytest validacion_datos -rs
+```
+
+Sin `VALIDACION_REQUIERE_DATOS`, la misma orden omite las pruebas cuando faltan datos (ver la
+tabla de abajo). Tarda menos de un minuto. P1 y P2 se validan con una muestra de hasta
+200,000 filas por particion (semilla 42, ver `contrato.MUESTRA_POR_DEFECTO`) porque tienen
+millones de filas; P3 se valida completo. El tamano de cada muestra queda en el resumen.
+
+### Que revisa cada suite
+
+Cada pregunta se parte con el mismo corte cronologico que el entrenamiento
+(`entrenamiento` y `prueba`, fechas en `config.py`) y se declara explicitamente la etiqueta,
+las variables y cuales son categoricas. DeepChecks no tiene que adivinarlas.
+
+| Palabra de la rubrica | Check de DeepChecks | Suite | Estado |
+|---|---|---|---|
+| Valores faltantes | `PercentOfNulls` (condicion: 0 % de nulos, agregado a mano porque `data_integrity()` no lo trae), `MixedNulls` | integridad | Corre |
+| Tipos de datos | `MixedDataTypes`, `SpecialCharacters`, `StringMismatch`, `StringLengthOutOfBounds` | integridad | Corre |
+| Duplicados | `DataDuplicates` (sobre la muestra) y, con pandas sobre el archivo completo, llave sin nulos y unica: `(estacion_id, hora)` en P1, `(estacion_id, bloque_inicio)` en P2, `(estacion_id, periodo)` en P3 | integridad | Corre |
+| Constantes | `IsSingleValue` | integridad | Corre |
+| Redundancia y etiqueta | `FeatureFeatureCorrelation`, `FeatureLabelCorrelation`, `IdentifierLabelCorrelation`, `ConflictingLabels`, `OutlierSampleDetection` (sin condicion, solo informativo) | integridad | Corre |
+| Deriva (drift) | `FeatureDrift`, `LabelDrift`, `NewCategoryTrainTest`, `MultivariateDrift` | entrenamiento contra prueba | En la rama `test/deepchecks-drift` |
+| Fuga temporal | `DateTrainTestLeakageOverlap` | entrenamiento contra prueba | En la rama `test/deepchecks-drift` |
+
+Los checks que dependen de la etiqueta no aplican donde no hay una: P3 es clustering (no
+tiene etiqueta) y `ConflictingLabels` no aplica a la regresion de P1. No se omiten en
+silencio: se quitan de la suite y el resumen los lista como `no_aplica` con la razon.
+`estacion_id` se declara categorica solo para que `NewCategoryTrainTest` muestre las
+estaciones que aparecen despues del corte; no es entrada de ningun modelo y se excluye de
+la suite de integridad, donde solo genera correlaciones sin sentido.
+
+### Esperado y bloqueante
+
+Cada check termina en uno de seis estados. Solo dos bloquean:
+
+| Estado | Significado | Bloquea |
+|---|---|---|
+| `pasa` | La condicion se cumple | No |
+| `falla_esperada` | Falla, pero esta en `ESPERADAS` (`validacion_datos/suites.py`) con la razon verificada | No |
+| `informativo` | El check no tiene condicion (solo reporte) | No |
+| `no_aplica` | Se quito de la suite porque no corresponde a la pregunta; se declara | No |
+| `falla_bloqueante` | Falla y no esta justificada, o falla una columna o par que no estaba en la lista | **Si** |
+| `no_corrio` | El check se rompio o no pudo correr | **Si** |
+
+No se aflojo ningun umbral para poner todo en verde. Una falla esperada se limita a las
+columnas o pares concretos documentados; si aparece otra, vuelve a ser bloqueante.
+
+| Pregunta | Check | Por que se espera | Alcance exacto |
+|---|---|---|---|
+| P1 | Feature-Feature Correlation | Las medias moviles de las 24 h y de los 7 dias previos se traslapan, su correlacion supera 0.9 por construccion | `salidas_media_24h_previa` con `salidas_media_7d` |
+| P2 | Feature-Feature Correlation | `neto_rel_*` es la version absoluta dividida entre la capacidad de la estacion | `neto_lag_dia` con `neto_rel_lag_dia`; `neto_media_mismo_bloque_7d` con `neto_rel_media_mismo_bloque_7d` |
+| P3 | Single Value in Column | Perfiles horarios de las 02 a las 04 h valen 0.0 en todas las estaciones de la particion (7 columnas en entrenamiento, 3 en prueba; el conjunto cambia). En prueba esas columnas valen como maximo 0.006 y el `StandardScaler` ajustado en entrenamiento las deja sin escalar | Solo las columnas `sal_*` y `lle_*` de las horas 02, 03 y 04 |
+
+Son redundancia entre variables, no defectos de los datos. Para P3 la causa de fondo (cierre
+del servicio o poca actividad nocturna) no esta verificada.
+
+### Datos faltantes o desactualizados
+
+Los datos no estan en Git, asi que "sin datos" es un estado de la instalacion, no un defecto
+de los datos.
+
+| Donde y como | Estado de los datos | Resultado |
+|---|---|---|
+| Ambiente principal: `make test`, CI | cualquiera | Las pruebas de validacion no se recolectan. La prueba guarda (`tests/test_contrato_validacion.py`) si corre y no necesita datos |
+| Ambiente de validacion: `pytest validacion_datos` | faltan | **Omitida**, con el mensaje `corre make data && make features` |
+| Ambiente de validacion, cualquier modo | desactualizados (`data_version` de `features_meta.json` distinta de la version del manifiesto) | **Falla**: se validarian datos que no corresponden al manifiesto |
+| `make validate` (`VALIDACION_REQUIERE_DATOS=1`) | faltan | **Falla** con un mensaje claro: no se puede declarar "validado" sin datos |
+| Ambiente de validacion | presentes | Corre; falla solo si hay hallazgos bloqueantes |
+| Ambiente principal corre `pytest validacion_datos` por error | - | Se omite con un aviso en lugar de un `ImportError` (`pytest.importorskip`) |
+
+### Donde quedan los reportes
+
+| Que | Donde | En Git |
+|---|---|---|
+| Reportes HTML de DeepChecks | `reports/validacion/<p1\|p2\|p3>/<suite>_<particion>.html` | No (`.gitignore`): incluyen filas de datos y se regeneran en cada corrida |
+| Resumen | [`reports/validacion/resumen_validacion.md`](reports/validacion/resumen_validacion.md) | Si: solo metadatos (version de datos, tamano de muestra, estado de cada check y explicacion de cada falla esperada) |
+
+El resumen se reescribe en cada corrida. Compara su `Version de datos` con la de
+`references/manifiesto_datos.json` para saber si esta al dia.
+
 ## Flujo de trabajo con Git y GitHub
 
 Seguimos [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow):
