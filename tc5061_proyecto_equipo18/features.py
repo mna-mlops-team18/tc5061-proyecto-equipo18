@@ -142,6 +142,11 @@ def contar_por_estacion_hora(
     llegadas.index = llegadas.index.set_names(["estacion_id", "hora"])
     conteos = pd.concat({"salidas": salidas, "llegadas": llegadas}, axis=1).fillna(0).reset_index()
     conteos = conteos[(conteos["hora"] >= inicio) & (conteos["hora"] <= fin)]
+    if conteos.empty:
+        # Sin esta revision, pandas fallaria mas abajo con un mensaje poco claro
+        raise ValueError(
+            f"No hay viajes entre {mes_inicio} y {mes_fin}: revisa el rango o corre la ingesta."
+        )
 
     ventanas = conteos.groupby("estacion_id")["hora"].agg(["min", "max"])
     mallas = [
