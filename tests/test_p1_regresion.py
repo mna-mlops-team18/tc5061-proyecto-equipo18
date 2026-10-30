@@ -132,3 +132,26 @@ def test_glm_sin_convergencia_queda_registrado(mlflow_temporal, datos_p1):
     metricas = mlflow.get_run(run_id).data.metrics
     assert metricas["entrenamiento_iteraciones"] == 1
     assert metricas["entrenamiento_sin_convergencia"] == 1
+
+
+# =============================================================================
+# Casos limite
+# =============================================================================
+def test_metricas_regresion_sin_viajes_reales():
+    """Sin viajes reales en el periodo, el WAPE no esta definido: no se divide entre 0."""
+    metricas = p1_regresion.metricas_regresion(np.zeros(3), np.array([0.0, 1.0, 2.0]))
+    assert np.isnan(metricas["wape"])
+    assert metricas["mae"] == pytest.approx(1.0)
+    assert np.isfinite(metricas["devianza_poisson"])
+
+
+def test_metricas_regresion_prediccion_perfecta():
+    real = np.array([0, 1, 5, 2])
+    metricas = p1_regresion.metricas_regresion(real, real.astype(float))
+    assert metricas["mae"] == metricas["rmse"] == metricas["wape"] == 0
+    assert metricas["r2"] == pytest.approx(1.0)
+
+
+def test_construir_estimador_desconocido_falla_con_mensaje_claro():
+    with pytest.raises(ValueError, match="no sabe construir"):
+        p1_regresion.construir_estimador("bosque_aleatorio", {})
