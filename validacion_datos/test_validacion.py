@@ -47,3 +47,29 @@ def test_sin_hallazgos_bloqueantes(resultados, pregunta):
     assert not bloqueantes, (
         f"{len(bloqueantes)} hallazgos bloqueantes en {pregunta.upper()}:\n" + "\n".join(lineas)
     )
+
+
+@pytest.mark.parametrize("pregunta", sorted(contrato.ESPECIFICACIONES))
+def test_deriva_evaluo_checks(resultados, pregunta):
+    """La suite de deriva corrio de verdad: no todos sus checks quedaron como no_aplica."""
+    evaluados = [
+        h for h in resultados[pregunta] if h.suite == "deriva" and h.estado != suites.NO_APLICA
+    ]
+    assert evaluados, f"{pregunta.upper()}: train_test_validation no evaluo ningun check"
+
+
+@pytest.mark.parametrize("pregunta", ["p1", "p2"])
+def test_sin_fuga_temporal(resultados, pregunta):
+    """La particion cronologica no comparte fechas entre entrenamiento y prueba.
+
+    Exige que los checks existan: si alguien los quita o los renombra, falla en vez de pasar
+    con una lista vacia. P3 queda fuera: no tiene columna de tiempo (no_aplica).
+    """
+    fuga = [
+        h for h in resultados[pregunta] if h.comprobacion.startswith("Date Train-Test Leakage")
+    ]
+    assert len(fuga) == 2, f"{pregunta.upper()}: faltan los checks de fuga temporal: {fuga}"
+    no_pasan = [
+        f"{h.comprobacion}: {h.estado}, {h.detalle}" for h in fuga if h.estado != suites.PASA
+    ]
+    assert not no_pasan, f"{pregunta.upper()}: posible fuga temporal:\n" + "\n".join(no_pasan)
