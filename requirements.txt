@@ -2,7 +2,7 @@
 # Versiones fijas (==) para que cualquier clon limpio instale exactamente lo mismo.
 
 # Datos, modelos y seguimiento de experimentos
-mlflow==3.17.1
+mlflow==3.17.2
 numpy==2.5.3
 pandas==3.0.6
 pyarrow==25.0.1  # mlflow 3.17 requiere pyarrow<26
@@ -22,6 +22,10 @@ ipykernel==7.4.0
 pytest==9.1.1
 ruff==0.17.0
 mkdocs==1.6.1
+
+# Seguridad (make security): vulnerabilidades en dependencias y analisis estatico del codigo
+pip-audit==2.10.1
+bandit==1.9.4
 
 # El paquete del proyecto en modo editable: habilita `python -m tc5061_proyecto_equipo18...`
 -e .

@@ -248,6 +248,7 @@ forma `tipo(alcance): descripcion en imperativo`, por ejemplo
 | `feat` | Funcionalidad nueva |
 | `fix` | Correccion de un error |
 | `docs` | Documentacion, README, ML Canvas, diagramas, reportes |
+| `test` | Pruebas automatizadas, validacion de datos y chequeos de seguridad |
 | `data` | Cambios al manifiesto de datos (`references/manifiesto_datos.json`) y a su resumen. Rama `data/*`, por ejemplo `data/manifiesto-inicial` |
 | `chore` / `refactor` | Configuracion, estructura o limpieza sin cambiar comportamiento |
 
@@ -269,7 +270,50 @@ Practicas obligatorias de la entrega y como las aplica el repositorio:
 | Estructura | Configuracion en un solo lugar | Rutas, fechas, semillas, URL e hiperparametros solo en `config.py` | `config.py` |
 | Estructura | Dependencias fijas y entorno reproducible desde un clon limpio | `requirements.txt` con `==` y Python 3.14; instalacion documentada arriba | Archivo de dependencias y README |
 | Datos y Git | Ningun dato, modelo, carpeta de MLflow ni credencial en Git | `.gitignore` excluye `data/`, CSV, Parquet, `mlruns/`, `mlartifacts/`, `mlflow.db`, modelos y `.env` | `.gitignore` e historial |
+| Seguridad | Sin vulnerabilidades conocidas en dependencias ni en el codigo | `make security`: `pip-audit`, `bandit` y `tests/test_seguridad.py` (credenciales, archivos sensibles y `.gitignore`) | `reports/seguridad/resumen_seguridad.md` |
 | Datos y Git | Todo cambio entra a `main` por Pull Request revisado | `main` protegida con 1 aprobacion minima; squash and merge | Pestana Pull Requests |
+
+## Seguridad
+
+Chequeos basicos de seguridad, con un solo comando desde el ambiente `.venv` activado:
+
+```bash
+make security
+```
+
+Equivale a:
+
+```bash
+pip-audit --skip-editable --strict                 # vulnerabilidades conocidas en dependencias
+bandit -r tc5061_proyecto_equipo18                 # analisis estatico del codigo
+python -m pytest tests/test_seguridad.py           # credenciales, archivos sensibles y .gitignore
+```
+
+- **Dependencias (`pip-audit`).** Revisa todos los paquetes instalados en `.venv`, incluidas las
+  dependencias de las dependencias, contra la base de vulnerabilidades de PyPI (OSV).
+  `--skip-editable` omite el propio paquete del proyecto (no esta publicado) y `--strict` falla
+  si algun paquete no se puede revisar. Corre sobre el ambiente instalado con
+  `requirements.txt`; actualiza `pip` antes (`make requirements` ya lo hace), porque las
+  versiones viejas de `pip` tienen vulnerabilidades propias.
+- **Codigo (`bandit`).** Busca patrones inseguros en el modulo (y en `validacion_datos/` cuando
+  exista). Las pruebas no se analizan: usan `assert` a proposito. Cada excepcion se marca en el
+  codigo con `# nosec <regla>` y su razon; hoy solo hay dos, en la funcion que consulta el
+  commit con `git` (argumentos fijos, sin shell y con la ruta absoluta del ejecutable).
+- **Credenciales y archivos sensibles (`tests/test_seguridad.py`).** Comprueba que `.gitignore`
+  excluya `.env`, la base y los artefactos de MLflow, los datos de MiBici y los modelos
+  serializados; que ningun archivo versionado sea de un tipo sensible (llaves, `.env`, bases de
+  datos, Parquet, modelos); que ningun archivo versionado tenga algo con forma de credencial
+  (llaves de nube, tokens, contrasenas asignadas); y que `.env.example` no traiga valores. Estas
+  pruebas tambien corren con `make test`.
+- **Credenciales en variables de entorno.** El codigo no tiene credenciales: la URI de MLflow y
+  el espejo de datos se leen de variables de entorno (`.env`, que no se versiona; la plantilla es
+  `.env.example`). Si se usa un servidor remoto de MLflow, `MLFLOW_TRACKING_USERNAME` y
+  `MLFLOW_TRACKING_PASSWORD` van solo en `.env`.
+- **Datos personales.** Las columnas de usuario, genero y anio de nacimiento no se leen del CSV
+  (`tests/test_dataset.py` lo verifica) y el notebook se versiona sin salidas.
+
+Los resultados de la ultima revision (incluido el historial completo de Git) estan en
+`reports/seguridad/resumen_seguridad.md`.
 
 ## Integrantes y roles
 

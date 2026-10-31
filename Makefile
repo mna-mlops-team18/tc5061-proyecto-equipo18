@@ -97,6 +97,13 @@ register:
 test:
 	$(PYTHON_INTERPRETER) -m pytest
 
+## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
+.PHONY: security
+security:
+	pip-audit --skip-editable --strict
+	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos)
+	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
+
 
 #################################################################################
 # Self Documenting Commands                                                     #
