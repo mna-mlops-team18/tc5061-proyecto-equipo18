@@ -7,7 +7,7 @@ Se repite con `make security` desde el ambiente `.venv` (ver README > Seguridad)
 |---|---|---|---|---|
 | Vulnerabilidades en dependencias fijadas | `pip-audit` 2.10.1 | 1: `mlflow` 3.17.1, CVE-2026-53995 | `mlflow==3.17.2` | Sin vulnerabilidades |
 | Vulnerabilidades en el ambiente completo (con transitivas) | `pip-audit --skip-editable --strict` | 12, todas en `pip` 25.1.1 | Actualizar `pip` (`make requirements`) | Sin vulnerabilidades |
-| Analisis estatico del codigo | `bandit` 1.9.4 | 3 de severidad baja (B404, B603, B607) | Ruta absoluta de `git`; 2 excepciones justificadas | Sin hallazgos |
+| Analisis estatico del codigo | `bandit` 1.9.4 | 3 de severidad baja (B404, B603, B607) | Ruta absoluta de `git` (atiende B607); 2 excepciones justificadas | Sin hallazgos |
 | Credenciales y archivos sensibles versionados | `tests/test_seguridad.py` | Sin hallazgos | Pruebas automaticas nuevas | 12 pruebas pasan |
 | Credenciales en el historial completo de Git | `git log -p --all` con patrones | Sin hallazgos | Ninguna | Sin hallazgos |
 
@@ -40,18 +40,23 @@ registrarlo en cada run de MLflow:
 
 | Regla | Que avisa | Decision |
 |---|---|---|
-| B607 | Proceso iniciado con una ruta parcial (`"git"`), que depende del `PATH` | Corregido: se usa la ruta absoluta (`shutil.which("git")`) |
+| B607 | Proceso iniciado con una ruta parcial (`"git"`), que depende del `PATH` | Se pasa la ruta absoluta (`shutil.which("git")`). Esto atiende el aviso, pero `shutil.which` tambien busca en el `PATH`, solo que antes de ejecutar: el riesgo no cambia y sigue siendo bajo (quien pudiera poner otro `git` en el `PATH` ya controla la computadora) |
 | B603 | `subprocess` sin shell: revisar que no reciba entrada no confiable | Excepcion `# nosec B603`: los argumentos son fijos del codigo, nunca texto del usuario |
 | B404 | Importar `subprocess` | Excepcion `# nosec B404`: solo lo usa `_git` |
 
 ```text
-$ bandit -r tc5061_proyecto_equipo18
+$ bandit -r tc5061_proyecto_equipo18 validacion_datos -x validacion_datos/test_validacion.py
 Test results:
 	No issues identified.
 	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 2
 ```
 
-Las pruebas (`tests/`) no se analizan con `bandit`: usan `assert` a proposito (regla B101).
+Las excepciones se escriben `# nosec B603  # razon`: la razon va despues de un segundo `#`,
+porque `bandit` lee como nombre de regla cada palabra que sigue a `nosec`.
+
+Las pruebas no se analizan con `bandit`: usan `assert` a proposito (regla B101). Por eso
+`make security` analiza `tc5061_proyecto_equipo18/` y `validacion_datos/`, pero excluye
+`validacion_datos/test_validacion.py`, y no incluye `tests/`.
 
 ## Credenciales y archivos sensibles
 
@@ -86,6 +91,6 @@ Sin coincidencias en el primero; el segundo solo encuentra `.env.example`.
 ## Fuera de alcance
 
 - Analisis continuo en GitHub Actions: los chequeos se corren localmente con `make security`.
-- El ambiente de validacion de DeepChecks (`.venv-validacion`, PRs #23 y #24) tiene su propio
-  archivo de dependencias; conviene correr `pip-audit -r requirements-validacion.txt` cuando se
-  integre. `make security` ya incluye `validacion_datos/` en `bandit` cuando exista.
+- El ambiente de validacion de DeepChecks (`.venv-validacion`, Python 3.12) tiene su propio
+  archivo de dependencias, `requirements-validacion.txt`; `make security` no lo audita porque
+  corre en el ambiente principal. Su codigo (`validacion_datos/`) si pasa por `bandit`.

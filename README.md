@@ -428,7 +428,7 @@ Equivale a:
 
 ```bash
 pip-audit --skip-editable --strict                 # vulnerabilidades conocidas en dependencias
-bandit -r tc5061_proyecto_equipo18                 # analisis estatico del codigo
+bandit -r tc5061_proyecto_equipo18 validacion_datos -x validacion_datos/test_validacion.py   # codigo
 python -m pytest tests/test_seguridad.py           # credenciales, archivos sensibles y .gitignore
 ```
 
@@ -438,10 +438,11 @@ python -m pytest tests/test_seguridad.py           # credenciales, archivos sens
   si algun paquete no se puede revisar. Corre sobre el ambiente instalado con
   `requirements.txt`; actualiza `pip` antes (`make requirements` ya lo hace), porque las
   versiones viejas de `pip` tienen vulnerabilidades propias.
-- **Codigo (`bandit`).** Busca patrones inseguros en el modulo (y en `validacion_datos/` cuando
-  exista). Las pruebas no se analizan: usan `assert` a proposito. Cada excepcion se marca en el
-  codigo con `# nosec <regla>` y su razon; hoy solo hay dos, en la funcion que consulta el
-  commit con `git` (argumentos fijos, sin shell y con la ruta absoluta del ejecutable).
+- **Codigo (`bandit`).** Busca patrones inseguros en el modulo y en `validacion_datos/`. Las
+  pruebas no se analizan (`tests/` y `validacion_datos/test_validacion.py`): usan `assert` a
+  proposito. Cada excepcion se marca en el codigo como `# nosec <regla>  # razon` (la razon
+  despues de un segundo `#`, para que bandit no la lea como nombre de regla); hoy solo hay dos,
+  en la funcion que consulta el commit con `git` (argumentos fijos y sin shell).
 - **Credenciales y archivos sensibles (`tests/test_seguridad.py`).** Comprueba que `.gitignore`
   excluya `.env`, la base y los artefactos de MLflow, los datos de MiBici y los modelos
   serializados; que ningun archivo versionado sea de un tipo sensible (llaves, `.env`, bases de

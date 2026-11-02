@@ -15,7 +15,7 @@ Si el proyecto no esta en un repositorio de Git (por ejemplo, descargado como zi
 from pathlib import Path
 import re
 import shutil
-import subprocess  # nosec B404: solo git con argumentos fijos
+import subprocess  # nosec B404  # solo git con argumentos fijos
 
 import pytest
 
@@ -70,7 +70,7 @@ VARIABLES_CREDENCIAL = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|USERNA
 
 
 def git(*argumentos: str) -> str:
-    resultado = subprocess.run(  # nosec B603: argumentos fijos, sin shell
+    resultado = subprocess.run(  # nosec B603  # argumentos fijos, sin shell
         [GIT, *argumentos], cwd=config.PROJ_ROOT, capture_output=True, text=True, check=False
     )
     return resultado.stdout

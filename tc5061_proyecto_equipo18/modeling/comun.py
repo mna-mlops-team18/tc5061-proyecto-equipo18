@@ -40,7 +40,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
-import subprocess  # nosec B404: solo se usa en _git, con argumentos fijos y sin shell
+import subprocess  # nosec B404  # solo se usa en _git, con argumentos fijos y sin shell
 import tempfile
 import time
 from types import ModuleType
@@ -306,14 +306,16 @@ def estado_git() -> dict[str, str]:
 def _git(*argumentos: str) -> str:
     """Corre un comando de git de solo lectura en la raiz del repo y devuelve su salida.
 
-    Seguridad (bandit B603/B607): se usa la ruta absoluta de git (no se busca en el PATH al
-    ejecutar), sin shell, y los argumentos son fijos del codigo, nunca texto del usuario. Si git
-    no esta instalado, ``estado_git`` lo trata como "desconocido".
+    Seguridad (bandit B603/B607): se corre sin shell y los argumentos son fijos del codigo, nunca
+    texto del usuario. ``shutil.which`` tambien busca git en el PATH (solo que antes de ejecutar),
+    asi que pasar la ruta absoluta atiende el aviso B607 pero no cambia el riesgo, que es bajo:
+    alguien que pudiera poner otro "git" en el PATH ya controla la computadora. Si git no esta
+    instalado, ``estado_git`` lo trata como "desconocido".
     """
     ejecutable = shutil.which("git")
     if ejecutable is None:
         raise FileNotFoundError("git no esta instalado")
-    resultado = subprocess.run(  # nosec B603: argumentos fijos, sin shell
+    resultado = subprocess.run(  # nosec B603  # argumentos fijos, sin shell
         [ejecutable, *argumentos],
         cwd=config.PROJ_ROOT,
         capture_output=True,
