@@ -6,9 +6,10 @@ una comprobacion que no corrio cuenta como bloqueante, nunca se ignora en silenc
 no aplican a la pregunta (p. ej. las que piden etiqueta en P3) se quitan antes de correr y se
 anotan como ``no_aplica``: una omision declarada, no un choque.
 
-Hoy implementa la integridad de cada particion (``data_integrity``) y la unicidad de la llave
-sobre el archivo completo. La comparacion entrenamiento vs prueba (``train_test_validation``)
-se agrega aqui mismo, con ``_clasificar`` y ``_guardar_reporte``, y entra en ``ejecutar_todo``.
+Implementa la integridad de cada particion (``data_integrity``), la unicidad de la llave sobre
+el archivo completo y la comparacion entrenamiento vs prueba (``train_test_validation``: deriva
+y fuga temporal). La particion es cronologica, asi que la prueba (futuro) debe diferir del
+entrenamiento: la deriva se mide y se explica, la fuga temporal bloquea.
 """
 
 from dataclasses import dataclass
@@ -24,11 +25,17 @@ from deepchecks.core.check_result import CheckFailure
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.checks import (
     ConflictingLabels,
+    DateTrainTestLeakageDuplicates,
+    DateTrainTestLeakageOverlap,
     FeatureLabelCorrelation,
+    FeatureLabelCorrelationChange,
     IdentifierLabelCorrelation,
+    IndexTrainTestLeakage,
+    LabelDrift,
+    NewLabelTrainTest,
     PercentOfNulls,
 )
-from deepchecks.tabular.suites import data_integrity
+from deepchecks.tabular.suites import data_integrity, train_test_validation
 import pandas as pd
 
 from tc5061_proyecto_equipo18 import config
@@ -53,6 +60,36 @@ MAX_PORCENTAJE_NULOS = 0.0
 COLUMNAS_SOLO_VALIDACION = ("estacion_id",)
 # Umbral de la condicion por defecto de FeatureFeatureCorrelation (debe coincidir con ella)
 UMBRAL_CORRELACION = 0.9
+# Nombre de la "particion" de la suite que compara entrenamiento con prueba
+PARTICION_DERIVA = "entrenamiento_vs_prueba"
+
+# Umbral de la condicion por defecto de FeatureDrift (debe coincidir con ella): falla desde 0.2
+UMBRAL_DERIVA = 0.2
+# Importancia minima en el clasificador de dominio de MultivariateDrift para contar a una
+# variable como contribuyente principal. Es nuestro, solo delimita lo aceptado: no es de DeepChecks
+IMPORTANCIA_MINIMA = 0.1
+
+# La prueba es el futuro (jul a sep 2026), asi que difiere del entrenamiento por construccion
+# (oct 2024 a mar 2026). Estos motivos citan valores medidos en la corrida del 2026-10-30.
+_MOTIVO_ESTACIONES_NUEVAS = (
+    "Hay estaciones que aparecen en la prueba y nunca en el entrenamiento (99 de 469 en el "
+    "archivo completo, conteo con pandas): son el {porcentaje} de las filas de la prueba. La red "
+    "crece con el tiempo, asi que se espera. Solo se aceptan en estacion_id; si otra variable "
+    "categorica trae categorias nuevas, el hallazgo vuelve a ser bloqueante. Cuando se agregue "
+    "una estacion, el modelo no la vio en el entrenamiento: va a la seccion de limitaciones."
+)
+_MOTIVO_MES = (
+    "El entrenamiento cubre los 12 meses (oct 2024 a mar 2026) y la prueba solo jul a sep, asi "
+    "que la distribucion de mes difiere por construccion (Cramer's V {mes}). Es estacionalidad "
+    "de la particion cronologica, no un defecto de los datos. Es la unica variable que deriva: "
+    "la siguiente tiene un puntaje menor a 0.1, y la etiqueta no deriva (Label Drift {etiqueta})."
+)
+_MOTIVO_MULTIVARIADA = (
+    "El clasificador de dominio separa entrenamiento y prueba (AUC {auc}, puntaje {puntaje}) y "
+    "la unica variable que contribuye es mes (importancia 1.0), por la misma razon que Feature "
+    "Drift. Sin mes, el AUC baja a {auc_sin_mes} y el puntaje a {puntaje_sin_mes}, bajo el "
+    "umbral de 0.25; lo que queda es estacion_id: las estaciones nuevas, ya cubiertas arriba."
+)
 
 # Hallazgos aceptados: (pregunta, comprobacion) -> por que se espera y no bloquea.
 # Se llena DESPUES de abrir el HTML de cada falla y entender su causa (no antes), y el motivo
@@ -82,6 +119,32 @@ ESPERADAS: dict[tuple[str, str], str] = {
         "defecto de los datos; importa sobre todo al interpretar los coeficientes de un modelo "
         "lineal. El check usa 10,000 filas de la muestra."
     ),
+    ("p1", "New Category Train Test"): _MOTIVO_ESTACIONES_NUEVAS.format(porcentaje="17.73%"),
+    ("p2", "New Category Train Test"): _MOTIVO_ESTACIONES_NUEVAS.format(porcentaje="18.52%"),
+    ("p1", "Feature Drift"): _MOTIVO_MES.format(mes="0.84", etiqueta="0.03"),
+    ("p2", "Feature Drift"): _MOTIVO_MES.format(mes="0.84", etiqueta="0.04"),
+    ("p1", "Multivariate Drift"): _MOTIVO_MULTIVARIADA.format(
+        auc="0.92", puntaje="0.85", auc_sin_mes="0.58", puntaje_sin_mes="0.15"
+    ),
+    ("p2", "Multivariate Drift"): _MOTIVO_MULTIVARIADA.format(
+        auc="0.93", puntaje="0.86", auc_sin_mes="0.58", puntaje_sin_mes="0.17"
+    ),
+    ("p3", "Feature Drift"): (
+        "Deriva en 8 de 99 columnas: siete de perfil horario (lle_fds_h01, lle_lab_h01, "
+        "lle_fds_h05, lle_lab_h05, sal_fds_h05, sal_fds_h17, sal_fds_h18) y ratio_fin_semana, "
+        "con puntaje de 0.21 a 0.42 (KS). Cinco son horas de madrugada, vecinas de las h02 a h04 constantes "
+        "del hallazgo de integridad. La causa no esta verificada: la prueba tiene 459 estaciones "
+        "contra 370 del entrenamiento (90 nuevas y 1 que ya no esta), y el cambio de estaciones "
+        "podria explicar parte. Solo se aceptan esas 8 columnas; otra que derive vuelve a ser "
+        "bloqueante."
+    ),
+    ("p3", "Multivariate Drift"): (
+        "El clasificador de dominio separa los periodos (AUC 0.83, puntaje 0.67). Contribuyen "
+        "lle_fds_h01 (0.65), sal_fds_h05 (0.18) y balance_neto (0.12). Las dos primeras estan "
+        "entre las 8 con deriva; balance_neto no (su deriva univariada es menor a 0.2) y solo "
+        "se distingue en conjunto. La causa no esta verificada (ver Feature Drift de P3). Solo "
+        "se acepta con esas tres como contribuyentes."
+    ),
 }
 # Una falla esperada solo cubre lo que se listo: si aparece otra columna constante (p. ej.
 # log_viajes_dia) u otro par correlacionado, el hallazgo vuelve a ser bloqueante en vez de
@@ -100,6 +163,25 @@ PARES_CORRELACIONADOS_ESPERADOS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("neto_lag_dia", "neto_rel_lag_dia"),
         ("neto_media_mismo_bloque_7d", "neto_rel_media_mismo_bloque_7d"),
     },
+}
+# Lo mismo para la deriva: el hallazgo esperado cubre solo las columnas listadas.
+COLUMNAS_CON_DERIVA_ESPERADAS: dict[tuple[str, str], set[str]] = {
+    ("p1", "Feature Drift"): {"mes"},
+    ("p2", "Feature Drift"): {"mes"},
+    ("p3", "Feature Drift"): {
+        "lle_fds_h01", "lle_lab_h01", "lle_fds_h05", "lle_lab_h05",
+        "sal_fds_h05", "sal_fds_h17", "sal_fds_h18", "ratio_fin_semana",
+    },
+}  # fmt: skip
+CATEGORIAS_NUEVAS_ESPERADAS: dict[tuple[str, str], set[str]] = {
+    ("p1", "New Category Train Test"): {"estacion_id"},
+    ("p2", "New Category Train Test"): {"estacion_id"},
+}
+# MultivariateDrift solo da un puntaje; se acota con las variables que mas contribuyen
+CONTRIBUYENTES_ESPERADOS: dict[tuple[str, str], set[str]] = {
+    ("p1", "Multivariate Drift"): {"mes"},
+    ("p2", "Multivariate Drift"): {"mes"},
+    ("p3", "Multivariate Drift"): {"lle_fds_h01", "sal_fds_h05", "balance_neto"},
 }
 
 
@@ -160,6 +242,18 @@ def _fuera_de_lo_esperado(pregunta: str, nombre: str, r) -> list:
         altos = r.value[r.value > UMBRAL_CORRELACION].stack().index.to_list()
         pares = {(i, j) for i, j in altos if i < j}
         return sorted(pares - PARES_CORRELACIONADOS_ESPERADOS[clave])
+    if clave in COLUMNAS_CON_DERIVA_ESPERADAS:
+        # FeatureDrift devuelve {columna: {"Drift score": ...}}; falla desde el umbral (>=)
+        derivan = {c for c, v in r.value.items() if v["Drift score"] >= UMBRAL_DERIVA}
+        return sorted(derivan - COLUMNAS_CON_DERIVA_ESPERADAS[clave])
+    if clave in CATEGORIAS_NUEVAS_ESPERADAS:
+        # NewCategoryTrainTest devuelve un DataFrame por variable con "# New Categories"
+        con_nuevas = set(r.value.index[r.value["# New Categories"] > 0])
+        return sorted(con_nuevas - CATEGORIAS_NUEVAS_ESPERADAS[clave])
+    if clave in CONTRIBUYENTES_ESPERADOS:
+        importancias = r.value["domain_classifier_feature_importance"]
+        principales = {c for c, imp in importancias.items() if imp >= IMPORTANCIA_MINIMA}
+        return sorted(principales - CONTRIBUYENTES_ESPERADOS[clave])
     return []
 
 
@@ -241,6 +335,62 @@ def _integridad(pregunta: str, particion: str, df: pd.DataFrame) -> list[Hallazg
     for nombre, motivo in quitados:
         hallazgos.append(
             Hallazgo(pregunta, "integridad", particion, nombre, NO_APLICA, motivo, html=html)
+        )
+    return hallazgos
+
+
+def _deriva_que_no_aplica(esp: contrato.Especificacion) -> dict[type, str]:
+    """Clases de check de ``train_test_validation`` que no corresponden a la pregunta y el motivo."""
+    no_aplican = {
+        # Los conjuntos no llevan columna de indice: la llave se revisa en el archivo completo
+        # y la fuga temporal la cubre DateTrainTestLeakageOverlap. No se inventa un indice:
+        # tras reset_index ambas particiones valdrian 0..N y reportarian fuga total.
+        IndexTrainTestLeakage: (
+            "sin columna de indice; la llave se revisa en el archivo completo y la fuga "
+            "temporal con Date Train-Test Leakage"
+        ),
+    }
+    if esp.etiqueta is None:
+        sin_etiqueta = "requiere etiqueta y esta pregunta no tiene (clustering)"
+        for clase in (NewLabelTrainTest, FeatureLabelCorrelationChange, LabelDrift):
+            no_aplican[clase] = sin_etiqueta
+    elif esp.tarea == "regression":
+        no_aplican[NewLabelTrainTest] = "no aplica a regresion (la etiqueta es continua)"
+    if esp.columna_tiempo is None:
+        sin_tiempo = "sin columna de tiempo; la particion viene de la columna periodo"
+        for clase in (DateTrainTestLeakageDuplicates, DateTrainTestLeakageOverlap):
+            no_aplican[clase] = sin_tiempo
+    return no_aplican
+
+
+def _suite_deriva(esp: contrato.Especificacion):
+    """``train_test_validation`` sin los checks que no aplican; devuelve la suite y los quitados."""
+    suite = train_test_validation(random_state=config.SEMILLA)
+    no_aplican = _deriva_que_no_aplica(esp)
+    quitados = []
+    for indice, check in list(suite.checks.items()):
+        for clase, motivo in no_aplican.items():
+            if isinstance(check, clase):
+                suite.remove(indice)
+                quitados.append((check.name(), motivo))
+                break
+    return suite, quitados
+
+
+def _deriva(pregunta: str, entrenamiento: pd.DataFrame, prueba: pd.DataFrame) -> list[Hallazgo]:
+    """Entrenamiento contra prueba: deriva, categorias nuevas y fuga temporal.
+
+    Conserva ``estacion_id`` (a diferencia de la integridad): es lo que permite a
+    NewCategoryTrainTest mostrar las estaciones que solo aparecen en la prueba.
+    """
+    esp = contrato.ESPECIFICACIONES[pregunta]
+    suite, quitados = _suite_deriva(esp)
+    resultado = suite.run(_crear_dataset(entrenamiento, esp), _crear_dataset(prueba, esp))
+    html = _guardar_reporte(resultado, pregunta, f"deriva_{PARTICION_DERIVA}")
+    hallazgos = _clasificar(resultado, pregunta, "deriva", PARTICION_DERIVA, html)
+    for nombre, motivo in quitados:
+        hallazgos.append(
+            Hallazgo(pregunta, "deriva", PARTICION_DERIVA, nombre, NO_APLICA, motivo, html=html)
         )
     return hallazgos
 
@@ -341,6 +491,7 @@ def ejecutar_todo(muestra: int = contrato.MUESTRA_POR_DEFECTO) -> dict[str, list
         for nombre, df in particiones.items():
             hallazgos += _integridad(pregunta, nombre, df)
         hallazgos += _llave(pregunta)
+        hallazgos += _deriva(pregunta, entrenamiento, prueba)
         resultados[pregunta] = hallazgos
     escribir_resumen(resultados, tamanos, muestra)
     return resultados

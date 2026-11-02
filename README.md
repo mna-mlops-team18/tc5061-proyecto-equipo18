@@ -309,12 +309,37 @@ las variables y cuales son categoricas. DeepChecks no tiene que adivinarlas.
 | Duplicados | `DataDuplicates` (sobre la muestra) y, con pandas sobre el archivo completo, llave sin nulos y unica: `(estacion_id, hora)` en P1, `(estacion_id, bloque_inicio)` en P2, `(estacion_id, periodo)` en P3 | integridad | Corre |
 | Constantes | `IsSingleValue` | integridad | Corre |
 | Redundancia y etiqueta | `FeatureFeatureCorrelation`, `FeatureLabelCorrelation`, `IdentifierLabelCorrelation`, `ConflictingLabels`, `OutlierSampleDetection` (sin condicion, solo informativo) | integridad | Corre |
-| Deriva (drift) | `FeatureDrift`, `LabelDrift`, `NewCategoryTrainTest`, `MultivariateDrift` | entrenamiento contra prueba | En la rama `test/deepchecks-drift` |
-| Fuga temporal | `DateTrainTestLeakageOverlap` | entrenamiento contra prueba | En la rama `test/deepchecks-drift` |
+| Deriva (drift) | `FeatureDrift`, `LabelDrift`, `NewCategoryTrainTest`, `MultivariateDrift` | entrenamiento contra prueba (`train_test_validation`) | Corre |
+| Fuga temporal | `DateTrainTestLeakageOverlap`, `DateTrainTestLeakageDuplicates`, `TrainTestSamplesMix` | entrenamiento contra prueba | Corre |
 
 Los checks que dependen de la etiqueta no aplican donde no hay una: P3 es clustering (no
-tiene etiqueta) y `ConflictingLabels` no aplica a la regresion de P1. No se omiten en
+tiene etiqueta) y `ConflictingLabels` no aplica a la regresion de P1. En la suite de
+entrenamiento contra prueba tampoco aplican `NewLabelTrainTest` (regresion de P1 y P3),
+`IndexTrainTestLeakage` (los conjuntos no tienen indice), los checks de etiqueta de P3 y los
+de fecha de P3 (no tiene columna de tiempo; la particion viene de `periodo`). No se omiten en
 silencio: se quitan de la suite y el resumen los lista como `no_aplica` con la razon.
+
+### Entrenamiento contra prueba
+
+DeepChecks recomienda `train_test_validation()` justo despues de partir los datos y antes de
+tener un modelo, para comprobar que las particiones son representativas: clases con balance
+parecido, sin cambios grandes en las distribuciones y sin fuga de datos. Nuestra particion es
+cronologica, asi que esa idea se cumple a medias, y el resumen lo separa asi:
+
+- **La fuga temporal debe ser cero y bloquea.** `DateTrainTestLeakageOverlap`,
+  `DateTrainTestLeakageDuplicates` pasan en P1 y P2, y `TrainTestSamplesMix` en las tres
+  preguntas. La prueba (jul a sep 2026) es posterior al entrenamiento (oct 2024 a mar 2026), con la
+  validacion (abr a jun 2026) de por medio. `test_sin_fuga_temporal` lo exige.
+- **La deriva se mide y se explica, no se oculta.** La prueba es el futuro, asi que difiere del
+  entrenamiento por construccion (estacionalidad, estaciones nuevas). Cada deriva esperada se
+  limita a las columnas documentadas: si deriva otra, el hallazgo vuelve a ser bloqueante.
+- **Los umbrales son los de DeepChecks.** No se movio ninguno para poner todo en verde.
+
+Para `MultivariateDrift` el limite lo fijan las variables que mas contribuyen al clasificador de
+dominio (importancia de al menos 0.1, `IMPORTANCIA_MINIMA`; es un criterio nuestro, no de
+DeepChecks). `DatasetsSizeComparison` compara las muestras, no las particiones completas: los
+tamanos reales estan en el resumen. En esta suite `estacion_id` si se conserva, porque es lo
+que permite a `NewCategoryTrainTest` mostrar las estaciones nuevas.
 `estacion_id` se declara categorica solo para que `NewCategoryTrainTest` muestre las
 estaciones que aparecen despues del corte; no es entrada de ningun modelo y se excluye de
 la suite de integridad, donde solo genera correlaciones sin sentido.
@@ -343,6 +368,20 @@ columnas o pares concretos documentados; si aparece otra, vuelve a ser bloqueant
 
 Son redundancia entre variables, no defectos de los datos. Para P3 la causa de fondo (cierre
 del servicio o poca actividad nocturna) no esta verificada.
+
+Deriva entrenamiento contra prueba (valores de la corrida con la version de datos del resumen;
+el resumen lleva la razon completa de cada fila):
+
+| Pregunta | Check | Por que se espera | Alcance exacto |
+|---|---|---|---|
+| P1 y P2 | New Category Train Test | 99 estaciones de la prueba no estan en el entrenamiento: 17.73 % (P1) y 18.52 % (P2) de las filas de prueba. La red crece | Solo `estacion_id` |
+| P1 y P2 | Feature Drift | El entrenamiento cubre los 12 meses y la prueba solo jul a sep: `mes` difiere por construccion (Cramer's V 0.84). Ninguna otra variable pasa de 0.1 y la etiqueta no deriva (0.03 y 0.04) | Solo `mes` |
+| P1 y P2 | Multivariate Drift | AUC de 0.92 y 0.93, con `mes` como unica variable que contribuye. Sin `mes` el AUC baja a 0.58 (puntaje 0.15 y 0.17, bajo el umbral de 0.25); lo que queda es `estacion_id` | Contribuyente: solo `mes` |
+| P3 | Feature Drift | 8 de 99 columnas con puntaje de 0.21 a 0.42, cinco de ellas horas de madrugada. La causa no esta verificada: la prueba tiene 459 estaciones contra 370 (90 nuevas, 1 que ya no esta) | `lle_fds_h01`, `lle_lab_h01`, `lle_fds_h05`, `lle_lab_h05`, `sal_fds_h05`, `sal_fds_h17`, `sal_fds_h18`, `ratio_fin_semana` |
+| P3 | Multivariate Drift | AUC de 0.83. Contribuyen `lle_fds_h01`, `sal_fds_h05` y `balance_neto`; la causa no esta verificada | Contribuyentes: esas tres |
+
+Las estaciones nuevas y la estacionalidad pasan a las limitaciones del modelo: las estaciones
+que abren despues del corte no estan en el entrenamiento, y la prueba cubre solo tres meses.
 
 ### Datos faltantes o desactualizados
 
