@@ -5,6 +5,8 @@
 PROJECT_NAME = tc5061-proyecto-equipo18
 PYTHON_VERSION = 3.14
 PYTHON_INTERPRETER = python
+# Ambiente aparte de la validacion de datos (DeepChecks no importa en Python 3.14)
+VALIDACION_PY ?= .venv-validacion/bin/python
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -96,6 +98,17 @@ register:
 .PHONY: test
 test:
 	$(PYTHON_INTERPRETER) -m pytest
+
+## Create the separate DeepChecks environment (Python 3.12, needs uv)
+.PHONY: venv-validacion
+venv-validacion:
+	uv venv .venv-validacion --python 3.12
+	uv pip install --python $(VALIDACION_PY) -r requirements-validacion.txt
+
+## DeepChecks data validation in its own environment (needs data/processed; fails if missing)
+.PHONY: validate
+validate:
+	VALIDACION_REQUIERE_DATOS=1 $(VALIDACION_PY) -m pytest validacion_datos -rs
 
 
 #################################################################################

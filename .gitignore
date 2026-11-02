@@ -153,6 +153,15 @@ ENV/
 env.bak/
 venv.bak/
 
+# Entorno aparte de validacion de datos (DeepChecks, Python 3.12) y sus reportes HTML,
+# que incluyen filas de datos
+.venv-validacion/
+reports/validacion/**/*.html
+
+# Salidas de corridas locales (pytest, ruff, pruebas de humo): solo para revisar, no se versionan
+output/
+smoke-test/
+
 # Spyder project settings
 .spyderproject
 .spyproject

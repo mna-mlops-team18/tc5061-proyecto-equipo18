@@ -20,6 +20,8 @@ requires-python = "~=3.14.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# validacion_datos/ no es parte del paquete instalado; la raiz permite importarlo con `pytest`
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 99
@@ -27,12 +29,17 @@ line-length = 99
 # (p. ej. `except A, B:` sin parentesis), que fallan en 3.13 y confunden al leer.
 target-version = "py313"
 src = ["tc5061_proyecto_equipo18"]
-include = ["pyproject.toml", "tc5061_proyecto_equipo18/**/*.py", "tests/**/*.py"]
+include = [
+    "pyproject.toml",
+    "tc5061_proyecto_equipo18/**/*.py",
+    "tests/**/*.py",
+    "validacion_datos/**/*.py",
+]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["tc5061_proyecto_equipo18"]
+known-first-party = ["tc5061_proyecto_equipo18", "validacion_datos"]
 force-sort-within-sections = true
 
