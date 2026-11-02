@@ -7,6 +7,7 @@
 - [ ] `feat`: funcionalidad nueva
 - [ ] `fix`: correccion
 - [ ] `docs`: documentacion
+- [ ] `test`: pruebas automatizadas, validacion de datos o chequeos de seguridad
 - [ ] `data`: manifiesto de datos y su resumen (rama `data/...`)
 - [ ] `chore` / `refactor`: configuracion, estructura o limpieza sin cambiar comportamiento
 
