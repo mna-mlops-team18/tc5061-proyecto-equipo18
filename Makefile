@@ -5,6 +5,8 @@
 PROJECT_NAME = tc5061-proyecto-equipo18
 PYTHON_VERSION = 3.14
 PYTHON_INTERPRETER = python
+# Ambiente aparte de la validacion de datos (DeepChecks no importa en Python 3.14)
+VALIDACION_PY ?= .venv-validacion/bin/python
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -97,11 +99,22 @@ register:
 test:
 	$(PYTHON_INTERPRETER) -m pytest
 
+## Create the separate DeepChecks environment (Python 3.12, needs uv)
+.PHONY: venv-validacion
+venv-validacion:
+	uv venv .venv-validacion --python 3.12
+	uv pip install --python $(VALIDACION_PY) -r requirements-validacion.txt
+
+## DeepChecks data validation in its own environment (needs data/processed; fails if missing)
+.PHONY: validate
+validate:
+	VALIDACION_REQUIERE_DATOS=1 $(VALIDACION_PY) -m pytest validacion_datos -rs
+
 ## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
 .PHONY: security
 security:
 	pip-audit --skip-editable --strict
-	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos)
+	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) -x validacion_datos/test_validacion.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
 
 
