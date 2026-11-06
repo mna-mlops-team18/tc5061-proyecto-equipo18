@@ -20,7 +20,7 @@ requires-python = "~=3.14.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# validacion_datos/ no es parte del paquete instalado; la raiz permite importarlo con `pytest`
+# validacion_datos/ y api/ no son parte del paquete instalado; la raiz permite importarlos
 pythonpath = ["."]
 
 [tool.ruff]
@@ -32,6 +32,7 @@ src = ["tc5061_proyecto_equipo18"]
 include = [
     "pyproject.toml",
     "tc5061_proyecto_equipo18/**/*.py",
+    "api/**/*.py",
     "tests/**/*.py",
     "validacion_datos/**/*.py",
 ]
@@ -40,6 +41,6 @@ include = [
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["tc5061_proyecto_equipo18", "validacion_datos"]
+known-first-party = ["tc5061_proyecto_equipo18", "validacion_datos", "api"]
 force-sort-within-sections = true
 

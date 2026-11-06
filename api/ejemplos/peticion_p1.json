@@ -1,0 +1,42 @@
+{
+  "instancias": [
+    {
+      "estacion_id": 101,
+      "hora_dia": 8,
+      "dia_semana": 2,
+      "es_fin_semana": 0,
+      "es_festivo": 0,
+      "mes": 9,
+      "capacidad": 24,
+      "latitud": 20.6745,
+      "longitud": -103.3612,
+      "salidas_lag_24h": 7,
+      "salidas_lag_48h": 6,
+      "salidas_lag_168h": 8,
+      "salidas_lag_336h": 7,
+      "llegadas_lag_24h": 3,
+      "salidas_media_misma_hora_7d": 6.4,
+      "salidas_media_24h_previa": 2.3,
+      "salidas_media_7d": 2.1
+    },
+    {
+      "estacion_id": 202,
+      "hora_dia": 17,
+      "dia_semana": 5,
+      "es_fin_semana": 1,
+      "es_festivo": 0,
+      "mes": 9,
+      "capacidad": 16,
+      "latitud": 20.6597,
+      "longitud": -103.392,
+      "salidas_lag_24h": 2,
+      "salidas_lag_48h": 1,
+      "salidas_lag_168h": 3,
+      "salidas_lag_336h": 2,
+      "llegadas_lag_24h": 2,
+      "salidas_media_misma_hora_7d": 1.7,
+      "salidas_media_24h_previa": 0.8,
+      "salidas_media_7d": 0.9
+    }
+  ]
+}
