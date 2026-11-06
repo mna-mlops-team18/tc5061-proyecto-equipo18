@@ -10,6 +10,12 @@ scikit-learn==1.9.1
 skops==0.16.0  # formato seguro en que MLflow guarda los modelos de scikit-learn
 matplotlib==3.11.2
 
+# Servicio de prediccion: API REST (api/) y su cliente de pruebas. La imagen usa las mismas
+# versiones (requirements-api.txt)
+fastapi==0.162.0
+uvicorn==0.54.0
+httpx==0.28.1  # lo usa el TestClient de FastAPI en tests/test_api.py
+
 # Ingesta y linea de comandos
 requests==2.34.2
 typer==0.27.3
