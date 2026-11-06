@@ -94,6 +94,11 @@ search:
 register:
 	mlflow run . -e register -P pregunta=$(PREGUNTA) --env-manager local
 
+## Export the champion of P1 from the Model Registry to models/servicio/p1 for the API image
+.PHONY: export-model
+export-model:
+	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1
+
 ## Run the tests
 .PHONY: test
 test:

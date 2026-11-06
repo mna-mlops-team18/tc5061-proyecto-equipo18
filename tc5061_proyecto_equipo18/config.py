@@ -31,6 +31,9 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 EXTERNAL_DATA_DIR = DATA_DIR / "external"
 
 MODELS_DIR = PROJ_ROOT / "models"
+# Modelos exportados del Model Registry para la API: una carpeta por pregunta (p1/, ...), que
+# el Containerfile copia a la imagen. Como todo models/, Git la ignora.
+MODELO_SERVICIO_DIR = MODELS_DIR / "servicio"
 
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
