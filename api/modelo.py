@@ -1,9 +1,10 @@
-"""Carga del modelo de P1 y prediccion, separadas de la API.
+"""Carga de los modelos de P1, P2 y P3 y prediccion, separadas de la API.
 
-De donde sale el modelo (variable de entorno ``MODELO_URI``):
+De donde sale el modelo de cada pregunta (variable de entorno ``MODELO_URI_P1``, ``MODELO_URI_P2``
+o ``MODELO_URI_P3``):
 
-- **Carpeta local** (por defecto ``models/servicio/p1``; es la que copia el Containerfile): el
-  modelo exportado del Model Registry con
+- **Carpeta local** (por defecto ``models/servicio/p1``, ``p2`` o ``p3``; es la que copia el
+  Containerfile): el modelo exportado del Model Registry con
   ``python -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1``. Su ``registro.json``
   dice de que modelo registrado y de que version viene.
 - **URI del Model Registry** (``models:/<nombre>@<alias>`` o ``models:/<nombre>/<version>``):
@@ -11,11 +12,11 @@ De donde sale el modelo (variable de entorno ``MODELO_URI``):
   numero de version y se carga esa version exacta.
 
 Al cargar se comprueba que la firma del modelo tenga exactamente las variables de la API y se
-hace una autoprueba: el modelo debe predecir su propio ejemplo de entrada. Si algo falla, la API
-no arranca (es mejor no levantar el servicio que responder con un modelo equivocado).
+hace una autoprueba: el modelo debe predecir su propio ejemplo de entrada. Un modelo que no pasa
+estas pruebas no se sirve (es mejor responder 503 que responder con un modelo equivocado).
 
-MLflow se importa dentro de las funciones de carga: ``armar_entrada`` y ``validar_salida`` se
-pueden probar sin MLflow instalado.
+MLflow se importa dentro de las funciones de carga: ``armar_entrada``, ``validar_salida`` y
+``validar_clases`` se pueden probar sin MLflow instalado.
 """
 
 from dataclasses import dataclass, field
@@ -26,8 +27,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+PREGUNTAS = ("p1", "p2", "p3")
 RAIZ = Path(__file__).resolve().parents[1]  # raiz del repo; /app dentro de la imagen
-MODELO_POR_DEFECTO = RAIZ / "models" / "servicio" / "p1"
+MODELOS_DIR = RAIZ / "models" / "servicio"  # una carpeta por pregunta: p1/, p2/, p3/
+CLASES_VALIDAS = {"p2": {0, 1, 2}}  # P3 no fija el numero de grupos: basta que sea un entero >= 0
+
+
+def variable_de_entorno(pregunta: str) -> str:
+    """Nombre de la variable que elige el modelo de una pregunta: ``MODELO_URI_P1`` para P1."""
+    return f"MODELO_URI_{pregunta.upper()}"
+
+
 ARCHIVO_REGISTRO = "registro.json"  # lo escribe modeling/exportar.py
 
 
@@ -59,11 +69,15 @@ class ModeloServido:
     identidad: Identidad
     tipos: dict[str, np.dtype]  # columna -> tipo de la firma, en el orden de la firma
     origen: str  # carpeta o URI de donde se cargo
+    pregunta: str = "p1"  # decide como se revisa la salida: valores (P1) o clases (P2 y P3)
 
     def predecir(self, filas: list[dict]) -> np.ndarray:
-        """Una prediccion por fila, finita y no negativa."""
+        """Una prediccion por fila: valores finitos y no negativos (P1) o clases enteras."""
         entrada = armar_entrada(filas, self.tipos)
-        return validar_salida(self.modelo.predict(entrada), len(filas))
+        predicho = self.modelo.predict(entrada)
+        if self.pregunta == "p1":
+            return validar_salida(predicho, len(filas))
+        return validar_clases(predicho, len(filas), CLASES_VALIDAS.get(self.pregunta))
 
     def autoprueba(self) -> int:
         """Predice el ejemplo de entrada guardado con el modelo; devuelve cuantas filas."""
@@ -107,6 +121,29 @@ def validar_salida(predicho, n_filas: int) -> np.ndarray:
     return np.clip(valores, 0.0, None)
 
 
+def validar_clases(predicho, n_filas: int, validas: set[int] | None = None) -> np.ndarray:
+    """Comprueba la salida de un clasificador o agrupador: una clase entera por fila.
+
+    Con ``validas`` (P2: 0, 1 o 2) cualquier otra clase es un error del modelo; sin el (P3: el
+    numero de grupos lo define el entrenamiento) basta con que sea un entero no negativo.
+    """
+    valores = np.asarray(predicho).reshape(-1)
+    if valores.shape[0] != n_filas:
+        raise ErrorPrediccion(
+            f"El modelo devolvio {valores.shape[0]} valores para {n_filas} filas"
+        )
+    if not np.isfinite(valores.astype(float)).all():
+        raise ErrorPrediccion("El modelo devolvio valores no finitos (NaN o infinito)")
+    clases = valores.astype(np.int64)
+    if (clases != valores).any() or (clases < 0).any():
+        raise ErrorPrediccion("El modelo devolvio clases que no son enteros no negativos")
+    if validas is not None and not set(clases.tolist()) <= validas:
+        raise ErrorPrediccion(
+            f"El modelo devolvio clases fuera de {sorted(validas)}: {sorted(set(clases.tolist()))}"
+        )
+    return clases
+
+
 # =============================================================================
 # Carga (con MLflow)
 # =============================================================================
@@ -131,14 +168,14 @@ def verificar_columnas(tipos: dict[str, np.dtype], esperadas: list[str]) -> None
         )
 
 
-def identidad_local(carpeta: Path) -> Identidad:
+def identidad_local(carpeta: Path, pregunta: str = "p1") -> Identidad:
     """Identidad del modelo exportado, leida de su ``registro.json``."""
     ruta = carpeta / ARCHIVO_REGISTRO
     if not ruta.is_file():
         raise ErrorModelo(
             f"Falta {ruta}: sin el no se sabe que version del Model Registry se sirve. "
             "Exporta el modelo con: python -m tc5061_proyecto_equipo18.modeling.exportar "
-            "--pregunta p1"
+            f"--pregunta {pregunta}"
         )
     datos = json.loads(ruta.read_text(encoding="utf-8"))
     return Identidad(
@@ -176,16 +213,20 @@ def identidad_registry(uri: str) -> Identidad:
 
 
 def cargar_modelo(
-    origen: str | os.PathLike | None = None, columnas: list[str] | None = None
+    origen: str | os.PathLike | None = None,
+    columnas: list[str] | None = None,
+    pregunta: str = "p1",
 ) -> ModeloServido:
-    """Carga el modelo de ``origen`` (o de ``MODELO_URI``, o de la carpeta por defecto).
+    """Carga el modelo de ``origen`` (o de ``MODELO_URI_<PREGUNTA>``, o de ``models/servicio``).
 
     Con ``columnas`` exige que la firma tenga exactamente esas variables. Siempre hace la
     autoprueba con el ejemplo de entrada.
     """
     import mlflow.pyfunc
 
-    origen = str(origen or os.getenv("MODELO_URI") or MODELO_POR_DEFECTO)
+    origen = str(
+        origen or os.getenv(variable_de_entorno(pregunta)) or MODELOS_DIR / pregunta.lower()
+    )
     if origen.startswith("models:/"):
         identidad = identidad_registry(origen)
         uri = f"models:/{identidad.nombre}/{identidad.version}"  # la version exacta resuelta
@@ -194,15 +235,17 @@ def cargar_modelo(
         if not (carpeta / "MLmodel").is_file():
             raise ErrorModelo(
                 f"No hay un modelo de MLflow en {carpeta}. Exportalo del Model Registry con: "
-                "python -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1"
+                f"python -m tc5061_proyecto_equipo18.modeling.exportar --pregunta {pregunta}"
             )
-        identidad = identidad_local(carpeta)
+        identidad = identidad_local(carpeta, pregunta)
         uri = str(carpeta)
 
     modelo = mlflow.pyfunc.load_model(uri)
     tipos = tipos_de_firma(modelo)
     if columnas is not None:
         verificar_columnas(tipos, columnas)
-    servido = ModeloServido(modelo=modelo, identidad=identidad, tipos=tipos, origen=origen)
+    servido = ModeloServido(
+        modelo=modelo, identidad=identidad, tipos=tipos, origen=origen, pregunta=pregunta
+    )
     servido.autoprueba()
     return servido

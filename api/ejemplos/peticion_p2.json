@@ -1,0 +1,48 @@
+{
+  "instancias": [
+    {
+      "estacion_id": 13,
+      "bloque_dia": 6,
+      "dia_semana": 1,
+      "es_fin_semana": 0,
+      "es_festivo": 0,
+      "mes": 9,
+      "capacidad": 11.0,
+      "latitud": 20.681081,
+      "longitud": -103.360099,
+      "salidas_lag_1b": 0.0,
+      "llegadas_lag_1b": 1.0,
+      "neto_lag_1b": -1.0,
+      "neto_lag_dia": 2.0,
+      "neto_lag_semana": 6.0,
+      "neto_media_mismo_bloque_7d": 3.142857,
+      "neto_rel_media_mismo_bloque_7d": 0.285714,
+      "neto_rel_lag_dia": 0.181818,
+      "frac_vaciado_mismo_bloque_7d": 0.285714,
+      "frac_llenado_mismo_bloque_7d": 0.0,
+      "salidas_previas_24h": 52.0
+    },
+    {
+      "estacion_id": 34,
+      "bloque_dia": 9,
+      "dia_semana": 2,
+      "es_fin_semana": 0,
+      "es_festivo": 0,
+      "mes": 8,
+      "capacidad": 15.0,
+      "latitud": 20.677224,
+      "longitud": -103.345006,
+      "salidas_lag_1b": 6.0,
+      "llegadas_lag_1b": 23.0,
+      "neto_lag_1b": -17.0,
+      "neto_lag_dia": -24.0,
+      "neto_lag_semana": -21.0,
+      "neto_media_mismo_bloque_7d": -16.142857,
+      "neto_rel_media_mismo_bloque_7d": -1.07619,
+      "neto_rel_lag_dia": -1.6,
+      "frac_vaciado_mismo_bloque_7d": 0.0,
+      "frac_llenado_mismo_bloque_7d": 0.857143,
+      "salidas_previas_24h": 95.0
+    }
+  ]
+}

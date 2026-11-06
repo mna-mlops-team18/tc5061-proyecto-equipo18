@@ -9,16 +9,32 @@ from pydantic import ValidationError
 import pytest
 
 from api import esquemas
-from api.modelo import ErrorPrediccion, armar_entrada, validar_salida
+from api.modelo import ErrorPrediccion, armar_entrada, validar_clases, validar_salida
 from tc5061_proyecto_equipo18 import config
-from tc5061_proyecto_equipo18.features import COLUMNAS_P1
+from tc5061_proyecto_equipo18.features import COLUMNAS_P1, COLUMNAS_P2
+from tc5061_proyecto_equipo18.modeling.p3_clustering import columnas_variables
 
 EJEMPLO = esquemas.EJEMPLO_PETICION_P1
+INSTANCIAS = {
+    "p1": esquemas.InstanciaP1,
+    "p2": esquemas.InstanciaP2,
+    "p3": esquemas.InstanciaP3,
+}
+PETICIONES = {
+    "p1": esquemas.PeticionP1,
+    "p2": esquemas.PeticionP2,
+    "p3": esquemas.PeticionP3,
+}
+EJEMPLOS = {
+    "p1": EJEMPLO,
+    "p2": esquemas.EJEMPLO_PETICION_P2,
+    "p3": esquemas.EJEMPLO_PETICION_P3,
+}
 
 
-def instancia(**cambios) -> dict:
-    """Primera fila del ejemplo con ``cambios`` encima."""
-    fila = copy.deepcopy(EJEMPLO["instancias"][0])
+def instancia(pregunta: str = "p1", **cambios) -> dict:
+    """Primera fila del ejemplo de la pregunta con ``cambios`` encima."""
+    fila = copy.deepcopy(EJEMPLOS[pregunta]["instancias"][0])
     fila.update(cambios)
     return fila
 
@@ -28,27 +44,58 @@ def campos_con_error(error: ValidationError) -> set[str]:
 
 
 # =============================================================================
-# El contrato coincide con el modelo y con la documentacion
+# El contrato coincide con los modelos y con la documentacion
 # =============================================================================
-def test_variables_de_la_api_son_las_del_modelo():
+def test_variables_de_p1_son_las_del_modelo():
     """Mismo nombre y orden que features.COLUMNAS_P1 (con lo que se entreno el modelo)."""
     assert esquemas.COLUMNAS_P1 == COLUMNAS_P1
 
 
-def test_archivo_de_ejemplo_es_el_del_esquema():
+def test_variables_de_p2_son_las_del_modelo():
+    assert esquemas.COLUMNAS_P2 == COLUMNAS_P2
+
+
+def test_variables_de_p3_son_las_del_agrupador():
+    """Las que usa p3_clustering: los perfiles ``sal_*`` y ``lle_*`` y los tres agregados."""
+    perfil = [c for c in esquemas.COLUMNAS_P3 if c.startswith(("sal_", "lle_"))]
+    entrenamiento = pd.DataFrame(
+        columns=["estacion_id", "latitud", "capacidad", *esquemas.COLUMNAS_P3]
+    )
+    assert set(esquemas.COLUMNAS_P3) == set(columnas_variables(entrenamiento))
+    assert len(perfil) == 96
+    assert len(esquemas.COLUMNAS_P3) == 99
+
+
+def test_clases_de_p2_son_las_de_config():
+    assert esquemas.CLASES_P2 == config.P2_CLASES
+
+
+def test_archivo_de_ejemplo_de_p1_es_el_del_esquema():
     archivo = config.PROJ_ROOT / "api" / "ejemplos" / "peticion_p1.json"
     assert json.loads(archivo.read_text(encoding="utf-8")) == EJEMPLO
 
 
-def test_ejemplo_es_valido():
-    peticion = esquemas.PeticionP1.model_validate(EJEMPLO)
-    assert [i.estacion_id for i in peticion.instancias] == [101, 202]
+@pytest.mark.parametrize("pregunta", ["p1", "p2", "p3"])
+def test_ejemplo_es_valido(pregunta):
+    peticion = PETICIONES[pregunta].model_validate(EJEMPLOS[pregunta])
+    assert len(peticion.instancias) == 2
+    assert (
+        list(peticion.instancias[0].model_dump(exclude={"estacion_id"}))
+        == (esquemas.COLUMNAS[pregunta])
+    )
 
 
-def test_estacion_id_es_opcional():
-    fila = instancia()
+@pytest.mark.parametrize("pregunta", ["p1", "p2", "p3"])
+def test_estacion_id_es_opcional(pregunta):
+    fila = instancia(pregunta)
     del fila["estacion_id"]
-    assert esquemas.InstanciaP1.model_validate(fila).estacion_id is None
+    assert INSTANCIAS[pregunta].model_validate(fila).estacion_id is None
+
+
+def test_capacidad_acepta_decimales_como_la_firma_del_modelo():
+    """La firma registrada la declara ``double``: 15.0 es lo que manda el entrenamiento."""
+    assert esquemas.InstanciaP1.model_validate(instancia(capacidad=15.0)).capacidad == 15.0
+    assert esquemas.InstanciaP2.model_validate(instancia("p2", capacidad=15.0)).capacidad == 15.0
 
 
 # =============================================================================
@@ -76,37 +123,109 @@ def test_estacion_id_es_opcional():
         ({"hora": 8}, "hora"),  # campo desconocido (nombre mal escrito)
     ],
 )
-def test_rechaza_valores_invalidos(cambios, campo):
+def test_p1_rechaza_valores_invalidos(cambios, campo):
     with pytest.raises(ValidationError) as error:
         esquemas.InstanciaP1.model_validate(instancia(**cambios))
     assert campo in campos_con_error(error.value)
 
 
-def test_rechaza_una_variable_faltante():
-    fila = instancia()
-    del fila["mes"]
+@pytest.mark.parametrize(
+    ("cambios", "campo"),
+    [
+        ({"bloque_dia": 4}, "bloque_dia"),  # los bloques empiezan en 0, 3, 6, ..., 21
+        ({"bloque_dia": 24}, "bloque_dia"),
+        ({"bloque_dia": 6.0}, "bloque_dia"),
+        ({"dia_semana": 7}, "dia_semana"),
+        ({"capacidad": 500}, "capacidad"),
+        ({"latitud": 19.43}, "latitud"),
+        ({"salidas_lag_1b": -1}, "salidas_lag_1b"),
+        ({"salidas_previas_24h": 50000}, "salidas_previas_24h"),
+        ({"neto_lag_1b": 5000}, "neto_lag_1b"),
+        ({"neto_rel_lag_dia": -80}, "neto_rel_lag_dia"),
+        ({"frac_vaciado_mismo_bloque_7d": 1.2}, "frac_vaciado_mismo_bloque_7d"),
+        ({"frac_llenado_mismo_bloque_7d": -0.1}, "frac_llenado_mismo_bloque_7d"),
+        ({"neto_lag_dia": float("nan")}, "neto_lag_dia"),
+        ({"mes": "9"}, "mes"),
+        ({"hora_dia": 8}, "hora_dia"),  # variable de P1, no de P2
+    ],
+)
+def test_p2_rechaza_valores_invalidos(cambios, campo):
     with pytest.raises(ValidationError) as error:
-        esquemas.InstanciaP1.model_validate(fila)
-    assert "mes" in campos_con_error(error.value)
+        esquemas.InstanciaP2.model_validate(instancia("p2", **cambios))
+    assert campo in campos_con_error(error.value)
 
 
-@pytest.mark.parametrize(("dia_semana", "es_fin_semana"), [(5, 0), (6, 0), (0, 1), (4, 1)])
-def test_fin_de_semana_debe_coincidir_con_el_dia(dia_semana, es_fin_semana):
+def test_p2_acepta_flujos_negativos():
+    """El neto (salidas - llegadas) es negativo cuando la estacion recibe bicicletas."""
+    fila = instancia("p2", neto_lag_1b=-120.0, neto_rel_lag_dia=-4.5)
+    assert esquemas.InstanciaP2.model_validate(fila).neto_lag_1b == -120.0
+
+
+@pytest.mark.parametrize(
+    ("cambios", "campo"),
+    [
+        ({"sal_lab_h08": 1.5}, "sal_lab_h08"),
+        ({"lle_fds_h23": -0.01}, "lle_fds_h23"),
+        ({"sal_fds_h00": "0.1"}, "sal_fds_h00"),
+        ({"log_viajes_dia": -1}, "log_viajes_dia"),
+        ({"log_viajes_dia": 40}, "log_viajes_dia"),
+        ({"ratio_fin_semana": -0.5}, "ratio_fin_semana"),
+        ({"balance_neto": 1.5}, "balance_neto"),
+        ({"balance_neto": float("nan")}, "balance_neto"),
+        ({"latitud": 20.67}, "latitud"),  # la ubicacion no entra al agrupador
+    ],
+)
+def test_p3_rechaza_valores_invalidos(cambios, campo):
+    with pytest.raises(ValidationError) as error:
+        esquemas.InstanciaP3.model_validate(instancia("p3", **cambios))
+    assert campo in campos_con_error(error.value)
+
+
+def test_p3_el_perfil_horario_debe_sumar_uno():
+    fila = instancia("p3", sal_lab_h08=0.9)  # el ejemplo ya suma 1: ahora suma mucho mas
+    with pytest.raises(ValidationError, match=r"sal_lab_hHH deben sumar 1"):
+        esquemas.InstanciaP3.model_validate(fila)
+
+
+def test_p3_un_perfil_sin_viajes_suma_cero():
+    """Una estacion sin viajes en fin de semana tiene todo el perfil en 0, no en 1/24."""
+    fila = instancia("p3", **{f"sal_fds_h{hora:02d}": 0.0 for hora in range(24)})
+    assert esquemas.InstanciaP3.model_validate(fila).sal_fds_h00 == 0.0
+
+
+@pytest.mark.parametrize("pregunta", ["p1", "p2", "p3"])
+def test_rechaza_una_variable_faltante(pregunta):
+    fila = instancia(pregunta)
+    columna = esquemas.COLUMNAS[pregunta][4]
+    del fila[columna]
+    with pytest.raises(ValidationError) as error:
+        INSTANCIAS[pregunta].model_validate(fila)
+    assert columna in campos_con_error(error.value)
+
+
+@pytest.mark.parametrize(
+    ("pregunta", "dia_semana", "es_fin_semana"),
+    [(p, d, f) for p in ("p1", "p2") for d, f in [(5, 0), (6, 0), (0, 1), (4, 1)]],
+)
+def test_fin_de_semana_debe_coincidir_con_el_dia(pregunta, dia_semana, es_fin_semana):
     with pytest.raises(ValidationError, match="es_fin_semana debe ser"):
-        esquemas.InstanciaP1.model_validate(
-            instancia(dia_semana=dia_semana, es_fin_semana=es_fin_semana)
+        INSTANCIAS[pregunta].model_validate(
+            instancia(pregunta, dia_semana=dia_semana, es_fin_semana=es_fin_semana)
         )
 
 
+@pytest.mark.parametrize("pregunta", ["p1", "p2", "p3"])
 @pytest.mark.parametrize("cantidad", [0, esquemas.MAX_INSTANCIAS + 1])
-def test_tamano_del_lote(cantidad):
+def test_tamano_del_lote(pregunta, cantidad):
     with pytest.raises(ValidationError):
-        esquemas.PeticionP1.model_validate({"instancias": [instancia()] * cantidad})
+        PETICIONES[pregunta].model_validate({"instancias": [instancia(pregunta)] * cantidad})
 
 
-def test_lote_maximo_es_valido():
-    filas = [instancia()] * esquemas.MAX_INSTANCIAS
-    assert len(esquemas.PeticionP1.model_validate({"instancias": filas}).instancias) == len(filas)
+@pytest.mark.parametrize("pregunta", ["p1", "p2", "p3"])
+def test_lote_maximo_es_valido(pregunta):
+    filas = [instancia(pregunta)] * esquemas.MAX_INSTANCIAS
+    peticion = PETICIONES[pregunta].model_validate({"instancias": filas})
+    assert len(peticion.instancias) == len(filas)
 
 
 # =============================================================================
@@ -116,7 +235,7 @@ MODELO = {"nombre": "mibici-equipo18-p1-demanda", "version": "1"}
 
 
 @pytest.mark.parametrize("valor", [-0.5, float("nan"), float("inf")])
-def test_respuesta_rechaza_salidas_negativas_o_no_finitas(valor):
+def test_respuesta_p1_rechaza_salidas_negativas_o_no_finitas(valor):
     with pytest.raises(ValidationError):
         esquemas.RespuestaP1(
             modelo=MODELO, n=1, predicciones=[{"estacion_id": 1, "salidas_esperadas": valor}]
@@ -126,6 +245,27 @@ def test_respuesta_rechaza_salidas_negativas_o_no_finitas(valor):
 def test_respuesta_exige_una_prediccion_por_instancia():
     with pytest.raises(ValidationError, match="predicciones"):
         esquemas.RespuestaP1(modelo=MODELO, n=2, predicciones=[{"salidas_esperadas": 1.0}])
+    with pytest.raises(ValidationError, match="predicciones"):
+        esquemas.RespuestaP3(modelo=MODELO, n=3, predicciones=[{"grupo": 0}])
+
+
+@pytest.mark.parametrize(
+    ("clase", "riesgo"),
+    [(3, "riesgo_vaciado"), (-1, "sin_riesgo"), (1, "sin_riesgo"), (2, "riesgo_vaciado")],
+)
+def test_respuesta_p2_rechaza_clases_que_no_existen_o_con_otro_nombre(clase, riesgo):
+    with pytest.raises(ValidationError):
+        esquemas.PrediccionP2(clase=clase, riesgo=riesgo)
+
+
+def test_respuesta_p2_acepta_cada_clase_con_su_nombre():
+    for clase, riesgo in esquemas.CLASES_P2.items():
+        assert esquemas.PrediccionP2(clase=clase, riesgo=riesgo).riesgo == riesgo
+
+
+def test_respuesta_p3_rechaza_grupos_negativos():
+    with pytest.raises(ValidationError):
+        esquemas.PrediccionP3(grupo=-1)
 
 
 # =============================================================================
@@ -170,3 +310,24 @@ def test_salida_acepta_una_columna():
 def test_salida_invalida_es_error_de_prediccion(predicho, n_filas, mensaje):
     with pytest.raises(ErrorPrediccion, match=mensaje):
         validar_salida(predicho, n_filas)
+
+
+def test_clases_aceptan_enteros_de_cualquier_tipo():
+    assert validar_clases(np.array([0, 2, 1], dtype=np.int8), 3, {0, 1, 2}).tolist() == [0, 2, 1]
+    assert validar_clases(np.array([0.0, 4.0]), 2).tolist() == [0, 4]  # P3: sin lista de clases
+    assert validar_clases(pd.DataFrame({"y": [1, 1]}), 2).tolist() == [1, 1]
+
+
+@pytest.mark.parametrize(
+    ("predicho", "n_filas", "validas", "mensaje"),
+    [
+        (np.array([0, 1, 2]), 2, None, "3 valores para 2 filas"),
+        (np.array([0.0, np.nan]), 2, None, "no finitos"),
+        (np.array([0.5]), 1, None, "enteros no negativos"),
+        (np.array([-1]), 1, None, "enteros no negativos"),
+        (np.array([0, 3]), 2, {0, 1, 2}, r"fuera de \[0, 1, 2\]: \[0, 3\]"),
+    ],
+)
+def test_clases_invalidas_son_error_de_prediccion(predicho, n_filas, validas, mensaje):
+    with pytest.raises(ErrorPrediccion, match=mensaje):
+        validar_clases(predicho, n_filas, validas)
