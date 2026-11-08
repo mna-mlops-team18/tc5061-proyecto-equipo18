@@ -53,12 +53,17 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 ```
 |-- .github/                      <- Plantilla de Pull Request
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
+|-- Containerfile                 <- Imagen de la API (Podman o Docker)
+|-- .dockerignore                 <- Lista de permitidos del contexto de construccion de la imagen
 |-- Makefile                      <- Atajos para Linux y macOS: make mlflow-server, make train, make test
 |-- MLproject                     <- MLflow Project: puntos de entrada ingest, features, train y search
 |-- python_env.yaml               <- Ambiente del MLflow Project (versiones de requirements.txt)
 |-- README.md
 |-- pyproject.toml                <- Metadatos del paquete y configuracion de pytest y ruff
 |-- requirements.txt              <- Dependencias con version fija (==)
+|-- requirements-api.txt          <- Dependencias de la imagen de la API (mismas versiones)
+|
+|-- api/                          <- API FastAPI: main.py, esquemas.py, modelo.py y ejemplos/ de peticiones
 |
 |-- data/                         <- Ignorado por Git, se genera con la ingesta
 |   |-- raw/                      <- CSV originales, tal como los publica MiBici
@@ -407,6 +412,194 @@ de los datos.
 El resumen se reescribe en cada corrida. Compara su `Version de datos` con la de
 `references/manifiesto_datos.json` para saber si esta al dia.
 
+## Despliegue de la API (semana 8)
+
+Una sola API (FastAPI) sirve los tres champions del Model Registry y se empaqueta en una imagen
+de contenedor. Cada respuesta dice que modelo y que version la produjo.
+
+```
+MLflow Model Registry --(make export-model)--> models/servicio/p1,p2,p3 --(COPY)--> imagen
+   alias champion           registro.json con nombre, version y run                    |
+                                                                                       v
+                          cliente --JSON--> uvicorn + FastAPI (api/main.py) <-- carga los 3 modelos al arrancar
+```
+
+| Pieza | Archivo | Que hace |
+|---|---|---|
+| Exportador | `tc5061_proyecto_equipo18/modeling/exportar.py` | Baja el modelo con alias `champion` y escribe `registro.json` (nombre, version, run, linaje) |
+| Cargador | `api/modelo.py` | Carga cada modelo **una vez, al arrancar**; revisa que la firma coincida con la API y que el modelo prediga su propio ejemplo |
+| Esquemas | `api/esquemas.py` | Un esquema de peticion y uno de respuesta por pregunta, con rangos y tipos estrictos |
+| API | `api/main.py` | Endpoints, errores 422/500/503 y documentacion generada |
+| Imagen | `Containerfile`, `.dockerignore` | Python 3.14 fijado por digest, solo `requirements-api.txt`, usuario sin privilegios y `HEALTHCHECK` |
+
+### De donde sale el modelo
+
+| Opcion | Como | Ventaja | Costo |
+|---|---|---|---|
+| **B. Modelo dentro de la imagen (por defecto)** | `make export-model` antes de construir; el `Containerfile` copia `models/servicio/` | La imagen es autosuficiente y reproducible: no necesita el servidor de MLflow | Cambiar de modelo exige reconstruir la imagen |
+| **A. Model Registry al arrancar (desarrollo)** | `MODELO_URI_P1=models:/mibici-equipo18-p1-demanda@champion` y `MLFLOW_TRACKING_URI` | Cambiar el alias y reiniciar basta, sin reconstruir | El servidor de MLflow debe estar arriba y servir los artefactos |
+
+Elegimos **B como opcion por defecto** porque la entrega debe correr igual en cualquier
+computadora: con B, quien clona el repo solo necesita el modelo exportado, no un servidor de
+MLflow encendido ni acceso a nuestra base. La regla es una sola: si existe
+`MODELO_URI_<PREGUNTA>`, se carga de ahi; si no, de `models/servicio/<pregunta>`. Con A, el
+alias se resuelve a un numero de version y se carga esa version exacta, que es la que reporta
+`/modelo`. Para A desde un contenedor el servidor debe escuchar fuera de `127.0.0.1`
+(`--host 0.0.0.0`) y servir los artefactos (`--serve-artifacts`); si no, el contenedor ve los
+metadatos del registro pero no puede leer los archivos del modelo.
+
+Las versiones de las librerias van fijadas en `requirements-api.txt` (las mismas de
+`requirements.txt`) para que el modelo se cargue con la misma version de scikit-learn con la que
+se entreno; `tests/test_contenedor.py` lo comprueba.
+
+### Construir y correr
+
+Requiere el ambiente del proyecto (para exportar) y Podman o Docker (para la imagen). Desde la
+raiz del repo, con el servidor de MLflow en `http://127.0.0.1:5000` y los modelos ya registrados:
+
+```bash
+make export-model          # exporta p1, p2 y p3 a models/servicio/ (PREGUNTAS="p1" para uno solo)
+make image                 # construye mibici-api:latest (falla si falta algun modelo)
+make run-api               # corre el contenedor en http://127.0.0.1:8000
+```
+
+Los mismos pasos sin `make`:
+
+| Paso | Podman | Docker |
+|---|---|---|
+| Construir | `podman build -f Containerfile -t mibici-api:latest .` | `docker build -f Containerfile -t mibici-api:latest .` |
+| Correr | `podman run --rm --name mibici-api -p 127.0.0.1:8000:8000 mibici-api:latest` | `docker run --rm --name mibici-api -p 127.0.0.1:8000:8000 mibici-api:latest` |
+| Ver que corre | `podman ps` | `docker ps` |
+
+`make` usa Podman si esta instalado y Docker si no (`make image CONTAINER=docker`). Para usar el
+modelo del registro en lugar del de la imagen (opcion A), con el servidor de MLflow arrancado con
+`--host 0.0.0.0 --serve-artifacts`:
+
+```bash
+podman run --rm -p 127.0.0.1:8000:8000 \
+  -e MLFLOW_TRACKING_URI=http://host.containers.internal:5000 \
+  -e MODELO_URI_P1=models:/mibici-equipo18-p1-demanda@champion \
+  mibici-api:latest                      # en Docker: host.docker.internal
+```
+
+Sin contenedor, para desarrollar: `make api` (uvicorn con recarga en el puerto 8000).
+
+### Endpoints
+
+Documentacion interactiva (Swagger UI), generada por FastAPI: <http://127.0.0.1:8000/docs>
+(`/` redirige ahi). Todos los endpoints de prediccion reciben `{"instancias": [...]}` con de 1 a
+1000 filas, de modo que uno solo cubre una peticion unitaria y un lote, y responden en el mismo
+orden. Los ejemplos de peticion estan en `api/ejemplos/`.
+
+| Metodo | Ruta | Para que |
+|---|---|---|
+| GET | `/salud` | 200 si los tres modelos cargaron; 503 con el detalle si falta alguno |
+| GET | `/modelo` | Nombre, alias, version, run, variables de entrada y linaje de cada modelo |
+| POST | `/predicciones/p1` | Salidas esperadas de una estacion en una hora del dia siguiente |
+| POST | `/predicciones/p2` | Riesgo de vaciado o llenado de una estacion en un bloque de 3 h |
+| POST | `/predicciones/p3` | Grupo de una estacion segun su perfil de uso |
+
+**Validacion.** Los tipos son estrictos (`"8"`, `8.5` o `true` no se aceptan como un entero) y cada
+campo tiene su rango: `hora_dia` de 0 a 23, `dia_semana` de 0 a 6, `es_fin_semana` debe
+coincidir con `dia_semana`, las coordenadas deben caer en el area metropolitana de Guadalajara,
+etc. Una peticion invalida responde **422** con el campo y el motivo; un modelo que no cargo
+responde **503** solo en su endpoint (los otros siguen); una salida no valida del modelo responde
+**500**. La respuesta tambien tiene esquema (`response_model`), asi que la salida se valida igual
+que la entrada. Los valores negativos de P1 se recortan a 0.
+
+**P1 - demanda** (`api/ejemplos/peticion_p1.json` trae dos estaciones):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predicciones/p1 \
+  -H "Content-Type: application/json" -d @api/ejemplos/peticion_p1.json
+```
+
+```json
+{
+  "modelo": {"nombre": "mibici-equipo18-p1-demanda", "version": "1", "alias": "champion",
+             "run_id": "166442af41ea432bbe181ccd17a571f9"},
+  "n": 2,
+  "predicciones": [
+    {"estacion_id": 101, "salidas_esperadas": 7.5716},
+    {"estacion_id": 202, "salidas_esperadas": 1.2829}
+  ]
+}
+```
+
+**P2 - riesgo** (`0` sin riesgo, `1` riesgo de vaciado, `2` riesgo de llenado):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predicciones/p2 \
+  -H "Content-Type: application/json" -d @api/ejemplos/peticion_p2.json
+```
+
+```json
+{
+  "modelo": {"nombre": "mibici-equipo18-p2-riesgo", "version": "1", "alias": "champion",
+             "run_id": "46725b1767904a4eaab8cf94bc556883"},
+  "n": 2,
+  "predicciones": [
+    {"estacion_id": 13, "clase": 1, "riesgo": "riesgo_vaciado"},
+    {"estacion_id": 34, "clase": 2, "riesgo": "riesgo_llenado"}
+  ]
+}
+```
+
+**P3 - grupos** (la peticion lleva el perfil horario de la estacion, 75 variables; usa el archivo
+de ejemplo):
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/predicciones/p3 \
+  -H "Content-Type: application/json" -d @api/ejemplos/peticion_p3.json
+```
+
+```json
+{
+  "modelo": {"nombre": "mibici-equipo18-p3-grupos", "version": "1", "alias": "champion",
+             "run_id": "d70c53daedfd43689d51e990cc5d6432"},
+  "n": 2,
+  "predicciones": [
+    {"estacion_id": 2, "grupo": 1},
+    {"estacion_id": 3, "grupo": 1}
+  ]
+}
+```
+
+**Salud y modelos:** `curl -s http://127.0.0.1:8000/salud` responde
+`{"estado": "ok", "modelos": [{"pregunta": "p1", "estado": "ok", "nombre": "mibici-equipo18-p1-demanda", "version": "1", ...}, ...]}`.
+**Peticion invalida:** con `"hora_dia": 30` responde 422 con
+`"loc": ["body", "instancias", 0, "hora_dia"]` y `"msg": "Input should be less than or equal to 23"`.
+
+Los valores de las respuestas son los de los champions actuales (version 1 de cada modelo) y
+cambian si se registra otra version.
+
+### Estrategia de despliegue: tiempo real o por lotes
+
+La API es un servicio en linea (responde cada peticion al momento y acepta lotes de hasta 1000
+filas), pero eso no obliga a usarla en tiempo real: la estrategia depende de como MiBici usa cada
+prediccion. La API no calcula las variables; quien la llama envia las variables ya calculadas
+(rezagos, medias, perfiles), asi que el proceso que las arma es parte del despliegue.
+
+- **P1, demanda: por lotes.** La prediccion es de un dia antes y la usa el operador para
+  planear la flota, no para decidir en el momento. Conviene correr una vez por la noche una
+  peticion por lote con todas las estaciones y las 24 horas del dia siguiente, y guardar el
+  resultado para consulta. Un solo lote nocturno es mas barato y mas simple de operar que
+  responder miles de consultas sueltas, y los rezagos de 24 h a 336 h ya estan disponibles al
+  cierre del dia.
+- **P2, riesgo de vaciado o llenado: tiempo real.** El equipo de rebalanceo necesita saber que
+  estaciones estan por quedarse sin bicicletas o sin anclajes mientras decide a donde enviar los
+  camiones, y el riesgo cambia cada bloque de 3 h. Se consulta cuando empieza cada bloque (o
+  cuando el despachador abre la vista) con las variables del bloque anterior; la respuesta debe
+  llegar en segundos, algo razonable para un modelo de arbol que predice unas decenas de filas.
+- **P3, grupos de estaciones: por lotes.** El perfil de uso de una estacion cambia lentamente y
+  la usa el area de planeacion urbana para decisiones de expansion que se toman en semanas o
+  meses. Basta recalcular los grupos de las 470 estaciones activas cada vez que se reentrena el
+  modelo (por ejemplo, cada mes) y publicar el resultado; no hay un usuario esperando la
+  respuesta.
+
+En los tres casos el mismo contenedor sirve para ambos modos: un proceso programado llama al
+endpoint con un lote (P1 y P3) y una aplicacion o tablero lo llama bajo demanda (P2).
+
 ## Flujo de trabajo con Git y GitHub
 
 Seguimos [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow):
@@ -511,4 +704,5 @@ Los resultados de la ultima revision (incluido el historial completo de Git) est
 
 - [Propuesta de solucion, entrega 1](reports/propuesta_entrega1.md)
 - [ML Canvas](references/ml_canvas.md) - [Arquitectura](references/arquitectura.md)
+- [Despliegue de la API](#despliegue-de-la-api-semana-8) - Swagger en `/docs` con la API corriendo
 - [Resumen de los datos](reports/resumen_datos.md) - [Manifiesto de datos](references/manifiesto_datos.json)
