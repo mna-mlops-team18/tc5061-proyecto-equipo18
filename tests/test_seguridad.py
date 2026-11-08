@@ -37,6 +37,7 @@ DEBEN_IGNORARSE = [
     "data/raw/viajes/datos_abiertos_2026_09.csv",
     "data/processed/p1_demanda_estacion_hora.parquet",
     "models/p1-candidato-hgb_poisson.joblib",
+    "models/servicio/p1/model.skops",  # modelo exportado para la API (entrega 4)
     "modelo.pkl",
 ]
 
