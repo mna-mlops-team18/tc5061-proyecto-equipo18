@@ -7,6 +7,10 @@ PYTHON_VERSION = 3.14
 PYTHON_INTERPRETER = python
 # Ambiente aparte de la validacion de datos (DeepChecks no importa en Python 3.14)
 VALIDACION_PY ?= .venv-validacion/bin/python
+# Imagen de la API: podman si esta instalado, si no docker (make image CONTAINER=docker)
+CONTAINER ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+IMAGEN ?= mibici-api:latest
+PUERTO ?= 8000
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -99,6 +103,22 @@ register:
 export-model:
 	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1
 
+## Serve the API locally with reload on http://127.0.0.1:8000/docs (needs models/servicio)
+.PHONY: api
+api:
+	uvicorn api.main:app --reload --port $(PUERTO)
+
+## Build the API image from the Containerfile (needs the models exported to models/servicio)
+.PHONY: image
+image:
+	@test -f models/servicio/p1/MLmodel || { echo "Falta models/servicio/p1: exporta los modelos primero (README > Despliegue de la API)"; exit 1; }
+	$(CONTAINER) build -f Containerfile -t $(IMAGEN) .
+
+## Run the API image on http://127.0.0.1:8000 (Ctrl+C to stop)
+.PHONY: run-api
+run-api:
+	$(CONTAINER) run --rm --name mibici-api -p 127.0.0.1:$(PUERTO):8000 $(IMAGEN)
+
 ## Run the tests
 .PHONY: test
 test:
@@ -119,6 +139,7 @@ validate:
 .PHONY: security
 security:
 	pip-audit --skip-editable --strict
+	pip-audit --strict -r requirements-api.txt
 	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) -x validacion_datos/test_validacion.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
 
