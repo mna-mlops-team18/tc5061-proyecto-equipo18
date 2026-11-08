@@ -7,6 +7,12 @@ PYTHON_VERSION = 3.14
 PYTHON_INTERPRETER = python
 # Ambiente aparte de la validacion de datos (DeepChecks no importa en Python 3.14)
 VALIDACION_PY ?= .venv-validacion/bin/python
+# Imagen de la API: podman si esta instalado, si no docker (make image CONTAINER=docker)
+CONTAINER ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+IMAGEN ?= mibici-api:latest
+PUERTO ?= 8000
+# Preguntas que exporta make export-model (la API sirve las tres)
+PREGUNTAS ?= p1 p2 p3
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -94,10 +100,30 @@ search:
 register:
 	mlflow run . -e register -P pregunta=$(PREGUNTA) --env-manager local
 
-## Export the champion of P1 from the Model Registry to models/servicio/p1 for the API image
+## Export the champions from the Model Registry to models/servicio/ for the API image, e.g. make export-model PREGUNTAS=p1
 .PHONY: export-model
 export-model:
-	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1
+	@for pregunta in $(PREGUNTAS); do \
+		$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta $$pregunta || exit 1; \
+	done
+
+## Serve the API locally with reload on http://127.0.0.1:8000/docs (needs models/servicio)
+.PHONY: api
+api:
+	uvicorn api.main:app --reload --port $(PUERTO)
+
+## Build the API image from the Containerfile (needs the models exported to models/servicio)
+.PHONY: image
+image:
+	@for pregunta in p1 p2 p3; do \
+		test -f models/servicio/$$pregunta/MLmodel || { echo "Falta models/servicio/$$pregunta: exporta los modelos primero con make export-model"; exit 1; }; \
+	done
+	$(CONTAINER) build -f Containerfile -t $(IMAGEN) .
+
+## Run the API image on http://127.0.0.1:8000 (Ctrl+C to stop)
+.PHONY: run-api
+run-api:
+	$(CONTAINER) run --rm --name mibici-api -p 127.0.0.1:$(PUERTO):8000 $(IMAGEN)
 
 ## Run the tests
 .PHONY: test
@@ -119,6 +145,7 @@ validate:
 .PHONY: security
 security:
 	pip-audit --skip-editable --strict
+	pip-audit --strict -r requirements-api.txt
 	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) -x validacion_datos/test_validacion.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
 

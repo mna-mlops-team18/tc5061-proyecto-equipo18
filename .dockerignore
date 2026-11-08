@@ -1,0 +1,9 @@
+# Contexto de construccion de la imagen de la API (podman tambien lee este archivo).
+# Lista de permitidos: entra solo lo que copia el Containerfile. Asi no llegan a la imagen los
+# datos de MiBici, la base de MLflow (mlflow.db, mlruns/, mlartifacts/), .env ni los ambientes.
+*
+!requirements-api.txt
+!api/
+!models/servicio/
+**/__pycache__
+**/*.py[cod]
