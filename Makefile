@@ -11,6 +11,8 @@ VALIDACION_PY ?= .venv-validacion/bin/python
 CONTAINER ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 IMAGEN ?= mibici-api:latest
 PUERTO ?= 8000
+# Preguntas que exporta make export-model (la API sirve las tres)
+PREGUNTAS ?= p1 p2 p3
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -98,10 +100,12 @@ search:
 register:
 	mlflow run . -e register -P pregunta=$(PREGUNTA) --env-manager local
 
-## Export the champion of P1 from the Model Registry to models/servicio/p1 for the API image
+## Export the champions from the Model Registry to models/servicio/ for the API image, e.g. make export-model PREGUNTAS=p1
 .PHONY: export-model
 export-model:
-	$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1
+	@for pregunta in $(PREGUNTAS); do \
+		$(PYTHON_INTERPRETER) -m tc5061_proyecto_equipo18.modeling.exportar --pregunta $$pregunta || exit 1; \
+	done
 
 ## Serve the API locally with reload on http://127.0.0.1:8000/docs (needs models/servicio)
 .PHONY: api
@@ -111,7 +115,9 @@ api:
 ## Build the API image from the Containerfile (needs the models exported to models/servicio)
 .PHONY: image
 image:
-	@test -f models/servicio/p1/MLmodel || { echo "Falta models/servicio/p1: exporta los modelos primero (README > Despliegue de la API)"; exit 1; }
+	@for pregunta in p1 p2 p3; do \
+		test -f models/servicio/$$pregunta/MLmodel || { echo "Falta models/servicio/$$pregunta: exporta los modelos primero con make export-model"; exit 1; }; \
+	done
 	$(CONTAINER) build -f Containerfile -t $(IMAGEN) .
 
 ## Run the API image on http://127.0.0.1:8000 (Ctrl+C to stop)
