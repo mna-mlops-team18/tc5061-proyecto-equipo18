@@ -7,6 +7,10 @@ PYTHON_VERSION = 3.14
 PYTHON_INTERPRETER = python
 # Ambiente aparte de la validacion de datos (DeepChecks no importa en Python 3.14)
 VALIDACION_PY ?= .venv-validacion/bin/python
+# Ambiente aparte del monitoreo de drift (Evidently usa pydantic.v1, que no corre en Python 3.14)
+MONITOREO_PY ?= .venv-monitoreo/bin/python
+# make abtest PROMOVER=si mueve los aliases si la regla de config.py indica promover a B
+PROMOVER ?= no
 # Imagen de la API: podman si esta instalado, si no docker (make image CONTAINER=docker)
 CONTAINER ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 IMAGEN ?= mibici-api:latest
@@ -141,12 +145,38 @@ venv-validacion:
 validate:
 	VALIDACION_REQUIERE_DATOS=1 $(VALIDACION_PY) -m pytest validacion_datos -rs
 
+## Create the separate Evidently environment for drift monitoring (Python 3.13, needs uv)
+.PHONY: venv-monitoreo
+venv-monitoreo:
+	uv venv .venv-monitoreo --python 3.13
+	uv pip install --python $(MONITOREO_PY) -r requirements-monitoreo.txt
+
+## Drift report of P1 with Evidently in its own environment (needs data/processed)
+.PHONY: drift
+drift:
+	$(MONITOREO_PY) -m monitoreo.drift
+
+## Tests of the drift report in the Evidently environment (synthetic data, no real data needed)
+.PHONY: test-monitoreo
+test-monitoreo:
+	$(MONITOREO_PY) -m pytest monitoreo -q
+
+## Continuous Training: retrain the P1 champion with recent data and register it as challenger
+.PHONY: retrain
+retrain:
+	mlflow run . -e retrain --env-manager local
+
+## A/B test of the P1 champion against the challenger, e.g. make abtest PROMOVER=si
+.PHONY: abtest
+abtest:
+	mlflow run . -e abtest -P promover=$(PROMOVER) --env-manager local
+
 ## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
 .PHONY: security
 security:
 	pip-audit --skip-editable --strict
 	pip-audit --strict -r requirements-api.txt
-	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) -x validacion_datos/test_validacion.py
+	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) $(wildcard monitoreo) -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
 
 

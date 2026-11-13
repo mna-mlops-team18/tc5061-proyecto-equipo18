@@ -15,6 +15,9 @@
 #   mlflow run . -e search -P pregunta=p2 --env-manager local
 #   mlflow run . -e register -P pregunta=p1 --env-manager local
 #   mlflow run . -e register -P pregunta=p2 -P run_id=<run elegido> --env-manager local
+#   mlflow run . -e retrain --env-manager local
+#   mlflow run . -e abtest --env-manager local
+#   mlflow run . -e abtest -P promover=si --env-manager local
 #
 # - Rutas, fechas, cortes, semilla, modelos e hiperparametros por defecto viven en config.py
 #   (P1_MODELOS, P2_MODELOS, P3_MODELOS y P*_BUSQUEDA); aqui no se repite ninguno.
@@ -55,3 +58,14 @@ entry_points:
     parameters:
       pregunta: {type: string}
     command: "python -m tc5061_proyecto_equipo18.modeling.registro --pregunta {pregunta}"
+
+  # Continuous Training (semana 9): version B del champion de P1 (mismo modelo e hiperparametros)
+  # entrenada con datos hasta config.REENTRENAMIENTO_FIN; se registra con el alias challenger.
+  retrain:
+    command: "python -m tc5061_proyecto_equipo18.modeling.reentrenar"
+
+  # A/B testing (semana 9): @champion contra @challenger de P1 con el mismo conjunto de evaluacion
+  # (config.AB_EVALUACION). Escribe reports/monitoreo/ab_test.md. Opcional: -P promover=si mueve
+  # los aliases solo si la regla de decision de config.py indica promover a B.
+  abtest:
+    command: "python -m tc5061_proyecto_equipo18.modeling.ab_test"

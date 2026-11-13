@@ -35,12 +35,13 @@ include = [
     "api/**/*.py",
     "tests/**/*.py",
     "validacion_datos/**/*.py",
+    "monitoreo/**/*.py",
 ]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["tc5061_proyecto_equipo18", "validacion_datos", "api"]
+known-first-party = ["tc5061_proyecto_equipo18", "validacion_datos", "api", "monitoreo"]
 force-sort-within-sections = true
 

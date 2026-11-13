@@ -1,0 +1,19 @@
+# Ambiente aparte del monitoreo de drift con Evidently (Python 3.13). Ver README > Monitoreo.
+# Por que: Evidently 0.7.23 usa pydantic.v1 por dentro y Pydantic avisa que esa parte no funciona
+# en Python 3.14 (el Python del proyecto); Evidently se prueba hasta Python 3.13.
+# Crear con: make venv-monitoreo (o, en Windows, ver README).
+# Probado con evidently 0.7.23, plotly 5.24.1, pydantic 2.13.5, pandas 3.0, numpy 2.5.3 y
+# scikit-learn 1.9.1 en Python 3.13 (Linux): el reporte corre y monitoreo/test_drift.py pasa.
+evidently==0.7.23
+plotly==5.24.1  # evidently 0.7.23 pide plotly<6
+pydantic==2.13.5
+pandas==3.0.6
+numpy==2.5.3
+pyarrow==25.0.1  # leer los Parquet que escribe el ambiente principal
+scikit-learn==1.9.1
+matplotlib==3.11.2
+# Las que importa config.py y plots.py del proyecto (no se instala el paquete, se corre desde la raiz)
+python-dotenv==1.2.4
+loguru==0.7.3
+typer==0.27.3
+pytest==9.1.1
