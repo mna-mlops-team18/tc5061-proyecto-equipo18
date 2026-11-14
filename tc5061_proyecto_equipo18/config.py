@@ -430,6 +430,80 @@ DESCRIPCIONES_REGISTRO = {
 ALIAS_PRODUCCION = "champion"
 ALIAS_RETADOR = "challenger"
 
+# =============================================================================
+# Monitoreo, drift y A/B testing de P1 (entregable 8, semana 9)
+# =============================================================================
+# Fechas inclusivas (AAAA-MM-DD): un periodo va de las 00:00 del primer dia a las 23:00 del
+# ultimo. Se monitorea P1 (demanda por estacion y hora).
+#
+# Referencia: los datos con que se entreno el champion (la particion de entrenamiento).
+# Actual: el trimestre mas reciente del proyecto (jul-sep 2026). El champion nunca lo vio: no
+# entreno con el ni se eligio con el. Representa produccion: lluvias, vacaciones de verano y la
+# ampliacion de la red (de unas 368 a 468 estaciones con viajes entre mayo y septiembre de 2026).
+MONITOREO_REFERENCIA = (f"{MES_INICIO}-01", FIN_ENTRENAMIENTO)
+MONITOREO_ACTUAL = ("2026-07-01", "2026-09-30")
+# Tres comparaciones para separar las causas del drift (una "escalera"):
+# - principal: lo que el modelo ve en produccion contra lo que aprendio (lo que pide la rubrica).
+# - sin_nuevas: lo mismo, pero solo con las estaciones que ya existian en la referencia. Lo que
+#   deriva en principal y aqui ya no, lo explican las estaciones nuevas.
+# - misma_temporada: jul-sep 2025 (dentro del entrenamiento) contra jul-sep 2026, solo
+#   estaciones conocidas. Quita la estacionalidad: lo que sigue derivando es un cambio de un anio
+#   a otro en la red que ya existia.
+MONITOREO_COMPARACIONES = {
+    "principal": {
+        "referencia": MONITOREO_REFERENCIA,
+        "actual": MONITOREO_ACTUAL,
+        "solo_conocidas": False,
+    },
+    "sin_nuevas": {
+        "referencia": MONITOREO_REFERENCIA,
+        "actual": MONITOREO_ACTUAL,
+        "solo_conocidas": True,
+    },
+    "misma_temporada": {
+        "referencia": ("2025-07-01", "2025-09-30"),
+        "actual": MONITOREO_ACTUAL,
+        "solo_conocidas": True,
+    },
+}
+# Filas por conjunto (muestra con SEMILLA), igual que la validacion de datos: P1 tiene millones
+MONITOREO_MUESTRA = 200_000
+# Con mas de 1000 filas, Evidently usa la distancia de Wasserstein normalizada (numericas) y la de
+# Jensen-Shannon (categoricas); una columna deriva si la distancia es >= 0.1 (su valor por
+# defecto). Se fijan aqui para que el criterio quede escrito y no dependa del tamano de la muestra.
+MONITOREO_METODO_NUMERICAS = "wasserstein"
+MONITOREO_METODO_CATEGORICAS = "jensenshannon"
+MONITOREO_UMBRAL = 0.1
+# Hay drift del conjunto si deriva al menos esta fraccion de columnas (default de Evidently)
+MONITOREO_DRIFT_SHARE = 0.5
+# Salidas. Los HTML de Evidently se ignoran en Git (pesan varios MB y se regeneran); el resumen,
+# los puntajes y las figuras si se versionan.
+MONITOREO_DIR = REPORTS_DIR / "monitoreo"
+MONITOREO_FIGURAS_DIR = FIGURES_DIR / "monitoreo"
+RESUMEN_DRIFT_MD = MONITOREO_DIR / "resumen_drift.md"
+PUNTAJES_DRIFT_CSV = MONITOREO_DIR / "drift_puntajes.csv"
+RESUMEN_AB_MD = MONITOREO_DIR / "ab_test.md"
+RESULTADOS_AB_JSON = MONITOREO_DIR / "ab_test.json"
+
+# Continuous Training: la version B es el mismo modelo con los mismos hiperparametros que el
+# champion, reentrenado con todos los datos hasta esta fecha (incluye jul-ago 2026, del periodo
+# actual). Asi el A/B mide solo el efecto de entrenar con datos recientes.
+REENTRENAMIENTO_FIN = "2026-08-31"
+# A/B testing: A (champion) y B (challenger) se evaluan sobre el MISMO conjunto, posterior a los
+# datos de entrenamiento de ambos: septiembre de 2026, el ultimo mes del periodo actual.
+AB_EVALUACION = ("2026-09-01", "2026-09-30")
+# Regla de decision, fijada ANTES de ver los resultados:
+# 1. Metrica principal: MAE (la misma con que se eligio el champion). B es mejor solo si el
+#    intervalo de confianza del bootstrap pareado por dia de (MAE de A - MAE de B) queda
+#    completo por encima de 0.
+# 2. Sin regresion: en las estaciones conocidas, el MAE de B no puede ser mas de 1 % peor.
+AB_METRICA = "mae"
+AB_REMUESTREOS = 10_000
+AB_CONFIANZA = 0.95
+AB_TOLERANCIA_CONOCIDAS = 0.01
+# Monitoreo del desempeno del champion mes a mes: validacion (abr-jun) y periodo actual (jul-sep)
+MONITOREO_MENSUAL = ("2026-04-01", "2026-09-30")
+
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135
 try:

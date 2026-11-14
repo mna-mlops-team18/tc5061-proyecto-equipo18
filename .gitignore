@@ -157,6 +157,9 @@ venv.bak/
 # que incluyen filas de datos
 .venv-validacion/
 reports/validacion/**/*.html
+# Monitoreo (semana 9): ambiente de Evidently y sus reportes HTML (pesan varios MB y se regeneran)
+.venv-monitoreo/
+reports/monitoreo/*.html
 
 # Salidas de corridas locales (pytest, ruff, pruebas de humo): solo para revisar, no se versionan
 output/
