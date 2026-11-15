@@ -21,8 +21,8 @@ la metrica con que se eligen, en ``config.METRICAS_SELECCION``.
 Cada run queda con:
 
 - **Etiquetas** para filtrar en la interfaz: ``equipo``, ``pregunta``, ``etapa`` (baseline,
-  candidato o busqueda), ``modelo``, ``familia_modelo``, ``data_version``, ``git_commit`` y
-  ``git_sucio``.
+  candidato, busqueda o reentrenamiento), ``modelo``, ``familia_modelo``, ``data_version``,
+  ``git_commit`` y ``git_sucio``.
 - **Parametros:** semilla, parametros de features, ``data_version``, ``modelo`` e
   hiperparametros.
 - **Artefactos** en subcarpetas: ``config/`` (corrida.json y los archivos de configuracion),
@@ -67,7 +67,9 @@ from tc5061_proyecto_equipo18.features import (
 from tc5061_proyecto_equipo18.plots import grafica_importancias, guardar_figura
 
 PREGUNTAS = ("P1", "P2", "P3")
-ETAPAS = ("baseline", "candidato", "busqueda")
+# "reentrenamiento": Continuous Training de P1 (modeling/reentrenar.py). No es candidato: el
+# register no lo considera, porque ya vio la validacion; se compara con el A/B testing.
+ETAPAS = ("baseline", "candidato", "busqueda", "reentrenamiento")
 MODULOS = {
     "P1": "tc5061_proyecto_equipo18.modeling.p1_regresion",
     "P2": "tc5061_proyecto_equipo18.modeling.p2_clasificacion",
