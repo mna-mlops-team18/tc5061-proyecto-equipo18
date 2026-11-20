@@ -1,0 +1,43 @@
+# Imagen del servidor de MLflow (tracking + Model Registry) del equipo 18 para Docker Compose.
+# La construye docker-compose.yml (servicio mlflow); el contexto es solo esta carpeta, asi que a
+# la imagen no llegan datos, modelos ni credenciales del repositorio.
+#
+# Es el mismo servidor que `make mlflow-server`, pero en contenedor: base SQLite y artefactos en
+# /mlflow, que Compose monta como un volumen con nombre (los runs sobreviven a reinicios).
+#
+# Misma imagen base que la API (Containerfile de la raiz), fijada por digest, y la misma version
+# de MLflow que requirements.txt (lo comprueba tests/test_compose.py).
+FROM docker.io/library/python:3.14.10-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MLFLOW_DISABLE_TELEMETRY=true \
+    HOME=/mlflow
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
+
+# Usuario sin privilegios, duenio de /mlflow: al montar un volumen nuevo ahi, Docker le copia
+# este duenio, asi que el servidor puede escribir su base y sus artefactos sin ser root
+RUN useradd --uid 10002 --home-dir /mlflow --no-create-home --shell /usr/sbin/nologin mlflow \
+    && mkdir -p /mlflow/mlartifacts \
+    && chown -R mlflow:mlflow /mlflow
+
+WORKDIR /mlflow
+USER mlflow
+EXPOSE 5000
+
+# Los hosts que acepta el servidor (MLFLOW_SERVER_ALLOWED_HOSTS) los fija docker-compose.yml:
+# dentro de la red de Compose la API lo llama "mlflow", que no esta en la lista por defecto.
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=5 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=4)"]
+
+# Un solo worker: es un servidor de desarrollo del equipo, no de inferencia (ver FinOps)
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "sqlite:////mlflow/mlflow.db", \
+     "--artifacts-destination", "/mlflow/mlartifacts", \
+     "--host", "0.0.0.0", "--port", "5000", \
+     "--workers", "1"]
