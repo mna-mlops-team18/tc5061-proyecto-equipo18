@@ -1,0 +1,103 @@
+# Sistema de MiBici (equipo 18) con Docker Compose: API de prediccion + servidor de MLflow.
+#
+# Un solo comando, desde la raiz del repo (con los modelos ya exportados a models/servicio/):
+#   docker compose up -d --build        # o: podman compose up -d --build / make up
+#
+#   API (FastAPI)       http://127.0.0.1:8000/docs
+#   MLflow (UI + Model Registry)  http://127.0.0.1:5000
+#
+# Ver README > Operacion con Docker Compose. Los valores entre ${...} se pueden cambiar en .env
+# (plantilla: .env.example) sin tocar este archivo.
+
+name: mibici-equipo18
+
+# Ajustes comunes de los servicios (anclas de YAML: se definen una vez y se reutilizan)
+x-comunes: &comunes
+  restart: unless-stopped # si un servicio se cae, Compose lo vuelve a levantar
+  networks: [mibici]
+  security_opt: ["no-new-privileges:true"] # el proceso no puede ganar privilegios
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" } # los logs no llenan el disco
+
+services:
+  # ---------------------------------------------------------------------------------------------
+  # Servidor de MLflow: tracking de experimentos y Model Registry (antes: make mlflow-server)
+  # ---------------------------------------------------------------------------------------------
+  mlflow:
+    <<: *comunes
+    build:
+      context: ./servidor_mlflow
+      dockerfile: Containerfile
+    image: mibici-mlflow:latest
+    container_name: mibici-mlflow
+    ports:
+      - "127.0.0.1:${MLFLOW_PUERTO:-5000}:5000" # solo desde esta computadora
+    volumes:
+      - mlflow-datos:/mlflow # mlflow.db y mlartifacts/ sobreviven a reinicios y a `down`
+    environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow:*,localhost,localhost:*,127.0.0.1,127.0.0.1:*"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
+
+  # ---------------------------------------------------------------------------------------------
+  # API de prediccion: P1, P2 y P3 (imagen del Containerfile de la raiz, semana 8)
+  # ---------------------------------------------------------------------------------------------
+  api:
+    <<: *comunes
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: mibici-api:latest
+    container_name: mibici-api
+    depends_on:
+      mlflow:
+        condition: service_healthy # arranca cuando el registry ya responde
+    ports:
+      - "127.0.0.1:${API_PUERTO:-8000}:8000"
+    environment:
+      # Dentro de la red de Compose el servidor se llama "mlflow" (no 127.0.0.1)
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Vacias (por defecto): la API sirve los modelos copiados en la imagen (opcion B).
+      # Con models:/<nombre>@champion los descarga del registry de Compose al arrancar (opcion A).
+      MODELO_URI_P1: ${MODELO_URI_P1:-}
+      MODELO_URI_P2: ${MODELO_URI_P2:-}
+      MODELO_URI_P3: ${MODELO_URI_P3:-}
+      # Procesos de uvicorn (uno por vCPU); uvicorn lee esta variable si el CMD no fija --workers
+      WEB_CONCURRENCY: ${API_WORKERS:-1}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/salud', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        # Limites = tamano de la instancia que se simula: la prueba de carga mide la capacidad
+        # de 1 vCPU y 1 GiB, que es lo que se traduce a costo en el analisis FinOps
+        limits:
+          cpus: "${API_CPUS:-1.0}"
+          memory: ${API_MEMORIA:-1g}
+
+networks:
+  mibici:
+    name: mibici-red
+
+volumes:
+  mlflow-datos:
+    name: mibici-mlflow-datos
