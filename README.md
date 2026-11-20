@@ -54,6 +54,7 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |-- .github/                      <- Plantilla de Pull Request
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
 |-- Containerfile                 <- Imagen de la API (Podman o Docker)
+|-- docker-compose.yml            <- Sistema completo con un comando: API + MLflow (+ Locust, perfil carga)
 |-- .dockerignore                 <- Lista de permitidos del contexto de construccion de la imagen
 |-- Makefile                      <- Atajos para Linux y macOS: make mlflow-server, make train, make test
 |-- MLproject                     <- MLflow Project: puntos de entrada ingest, features, train y search
@@ -73,9 +74,11 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |-- docs/                         <- Proyecto mkdocs por defecto de la plantilla
 |-- models/                       <- Modelos entrenados (ignorado por Git)
 |-- notebooks/                    <- Solo exploracion, p. ej. 1.0-ja-exploracion-viajes.ipynb
+|-- operacion/                    <- Semana 10: pruebas de humo del sistema (verificar.py)
 |-- references/                   <- manifiesto_datos.json, ML Canvas y arquitectura (md, png, html)
 |-- reports/                      <- propuesta_entrega1.md (Parte A) y resumen_datos.md
 |   +-- figures/                  <- Figuras generadas y capturas de MLflow
+|-- servidor_mlflow/              <- Imagen del servidor de MLflow para Compose (Containerfile, requirements.txt)
 |-- tests/                        <- Pruebas de ingesta, de fuga de informacion y de P1, P2 y P3
 |
 +-- tc5061_proyecto_equipo18/     <- Codigo fuente
@@ -600,6 +603,72 @@ prediccion. La API no calcula las variables; quien la llama envia las variables 
 En los tres casos el mismo contenedor sirve para ambos modos: un proceso programado llama al
 endpoint con un lote (P1 y P3) y una aplicacion o tablero lo llama bajo demanda (P2).
 
+## Operacion con Docker Compose (semana 10)
+
+El proyecto se levanta como un sistema de servicios con **un solo comando**. `docker-compose.yml`
+describe cada servicio, como se comunican y que recursos usa; funciona con Docker Compose y con
+Podman Compose.
+
+```
+                         red mibici-red (Docker Compose)
+ navegador --127.0.0.1:5000--> [mlflow]  servidor de MLflow: tracking + Model Registry
+                                  ^       (base y artefactos en el volumen mibici-mlflow-datos)
+                                  | http://mlflow:5000  (MLFLOW_TRACKING_URI de la API)
+ cliente  ---127.0.0.1:8000--> [api]     FastAPI con P1, P2 y P3 (limite: 1 vCPU y 1 GiB)
+```
+
+| Servicio | Imagen | Puerto | Que hace | Salud |
+|---|---|---|---|---|
+| `mlflow` | `mibici-mlflow` (`servidor_mlflow/Containerfile`) | 5000 | Tracking de experimentos y Model Registry; reemplaza a `make mlflow-server` | `GET /health` |
+| `api` | `mibici-api` (`Containerfile` de la semana 8) | 8000 | Sirve P1, P2 y P3; arranca cuando MLflow esta sano | `GET /salud` |
+
+### Levantar el sistema
+
+Requiere Docker Desktop o Podman y los modelos exportados (igual que la imagen de la semana 8).
+Desde la raiz del repo:
+
+```bash
+make export-model                  # 1. exporta los champions a models/servicio/ (con make mlflow-server arriba)
+                                   # 2. deten make mlflow-server (Ctrl+C): Compose usa el puerto 5000
+docker compose up -d --build       # 3. un solo comando: construye y levanta MLflow y la API (o: make up)
+docker compose ps                  #    los dos servicios deben decir "healthy"
+python -m operacion.verificar      # 4. pruebas de humo: salud, modelos, predicciones, 422 y MLflow
+docker compose down                # 5. bajar (el volumen de MLflow se conserva; -v lo borra)
+```
+
+En Windows los comandos son los mismos en PowerShell (sin `make`, el paso 1 es
+`python -m tc5061_proyecto_equipo18.modeling.exportar --pregunta p1`, y `p2` y `p3`). Con Podman:
+`podman compose up -d --build` (o `make up COMPOSE="podman compose"`). Con el sistema arriba:
+API en <http://127.0.0.1:8000/docs> y MLflow en <http://127.0.0.1:5000>.
+
+### Configuracion
+
+| Que | Como | Para que |
+|---|---|---|
+| Red propia | `networks: mibici` (`mibici-red`) | Los servicios se llaman por nombre (`http://mlflow:5000`) y quedan aislados de otros contenedores |
+| Volumen con nombre | `mlflow-datos:/mlflow` | `mlflow.db` y `mlartifacts/` sobreviven a reinicios y a `docker compose down` |
+| Variables de entorno | `.env` (plantilla: `.env.example`) | Puertos, tamano de la API (`API_CPUS`, `API_MEMORIA`, `API_WORKERS`) y origen de los modelos, sin tocar el archivo |
+| Orden de arranque | `depends_on: condition: service_healthy` | La API arranca cuando el registry ya responde |
+| Salud y reinicio | `healthcheck` en cada servicio y `restart: unless-stopped` | Compose sabe si un servicio esta sano y lo vuelve a levantar si se cae |
+| Limites de recursos | `deploy.resources.limits` (API: 1 vCPU y 1 GiB) | La prueba de carga mide una "instancia" de tamano conocido, que se traduce a costo (FinOps) |
+| Seguridad | Puertos solo en `127.0.0.1`, usuarios sin privilegios, `no-new-privileges`, MLflow con `MLFLOW_SERVER_ALLOWED_HOSTS` | Nada queda expuesto a la red local y ningun proceso puede ganar privilegios |
+| Logs | `json-file` con `max-size: 10m` y 3 archivos | Los logs no llenan el disco |
+
+`tests/test_compose.py` revisa todo esto sin levantar nada (y que la imagen de MLflow use la
+misma base y la misma version de MLflow que el proyecto).
+
+**De donde salen los modelos.** Por defecto la API sirve los modelos copiados en su imagen
+(opcion B de la semana 8). Para que los descargue del registry de Compose al arrancar (opcion A),
+define en `.env` `MODELO_URI_P1=models:/mibici-equipo18-p1-demanda@champion` (y P2, P3) y reinicia
+con `docker compose up -d`. El volumen de MLflow empieza vacio; para usar ahi el registry local
+del equipo, copialo una vez al volumen (desde la raiz del repo, en bash o PowerShell):
+
+```bash
+docker compose stop mlflow
+docker compose run --rm --no-deps -v "${PWD}:/origen:ro" mlflow sh -c "cp /origen/mlflow.db /mlflow/mlflow.db && cp -r /origen/mlartifacts/. /mlflow/mlartifacts/"
+docker compose up -d
+```
+
 ## Flujo de trabajo con Git y GitHub
 
 Seguimos [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow):
@@ -705,4 +774,5 @@ Los resultados de la ultima revision (incluido el historial completo de Git) est
 - [Propuesta de solucion, entrega 1](reports/propuesta_entrega1.md)
 - [ML Canvas](references/ml_canvas.md) - [Arquitectura](references/arquitectura.md)
 - [Despliegue de la API](#despliegue-de-la-api-semana-8) - Swagger en `/docs` con la API corriendo
+- [Operacion con Docker Compose](#operacion-con-docker-compose-semana-10)
 - [Resumen de los datos](reports/resumen_datos.md) - [Manifiesto de datos](references/manifiesto_datos.json)
