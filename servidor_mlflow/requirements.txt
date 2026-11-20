@@ -1,0 +1,5 @@
+# Dependencias de la imagen del servidor de MLflow (servidor_mlflow/Containerfile).
+# El servidor necesita mlflow completo (interfaz web, base de datos y Model Registry), no
+# mlflow-skinny. Misma version que requirements.txt (lo comprueba tests/test_compose.py), para
+# que el servidor y el cliente del proyecto hablen la misma version del protocolo.
+mlflow==3.17.2
