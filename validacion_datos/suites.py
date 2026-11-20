@@ -13,7 +13,7 @@ entrenamiento: la deriva se mide y se explica, la fuga temporal bloquea.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, datetime
 import os
 from pathlib import Path
 
@@ -432,7 +432,7 @@ def escribir_resumen(
         "# Resumen de la validacion de datos",
         "",
         f"- Version de datos: `{contrato.version_datos()}`",
-        f"- Fecha: {date.today().isoformat()}",
+        f"- Fecha: {datetime.now(UTC).date().isoformat()}",
         f"- Herramienta: DeepChecks {deepchecks.__version__} (ambiente aparte, ver README)",
         (
             f"- Muestra: hasta {muestra:,} filas por particion en P1 y P2 "
