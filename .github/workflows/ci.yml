@@ -1,0 +1,172 @@
+# CI/CD del proyecto MiBici (equipo 18). Ver README > Integracion continua.
+#
+# En cada push y pull request:
+#   1. calidad:   ruff (formato y reglas) y pytest con el ambiente del proyecto (Python 3.14)
+#   2. seguridad: pip-audit (dependencias) y bandit (codigo), como `make security`
+#   3. monitoreo: pruebas del reporte de drift con Evidently en su ambiente (Python 3.13)
+#   4. imagen:    construye la imagen de la API, la arranca y le hace pruebas de humo
+#
+# Las acciones se fijan por commit (no por etiqueta), para que una etiqueta movida no cambie lo
+# que corre aqui. El comentario de cada `uses` dice la version.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # correrlo a mano desde la pestana Actions
+
+# Un solo run por rama o PR: un push nuevo cancela el anterior que siga corriendo
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# El workflow solo lee el repositorio: no publica nada ni escribe en GitHub
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.14"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  calidad:
+    name: Formato, lint y pruebas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Instalar dependencias (make requirements)
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements.txt
+      - name: Formato (ruff format --check)
+        run: ruff format --check
+      - name: Lint (ruff check)
+        run: ruff check --output-format=github
+      - name: Pruebas (pytest)
+        # Sin datos de MiBici ni servidor de MLflow: las pruebas usan datos sinteticos y MLflow
+        # en SQLite temporal; las que necesitan datos reales se omiten con un mensaje
+        run: python -m pytest -q -rs --junitxml=reportes-ci/pytest.xml
+      - name: Guardar el reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-${{ github.run_id }}
+          path: reportes-ci/
+          retention-days: 14
+
+  seguridad:
+    name: Seguridad (pip-audit y bandit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Instalar dependencias
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements.txt
+      - name: Vulnerabilidades en dependencias del proyecto y de la imagen
+        run: |
+          pip-audit --skip-editable --strict --timeout 60
+          pip-audit --strict --timeout 60 -r requirements-api.txt
+      - name: Analisis estatico del codigo (bandit)
+        run: >-
+          bandit -r tc5061_proyecto_equipo18 validacion_datos monitoreo api
+          -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
+
+  monitoreo:
+    name: Pruebas del monitoreo (Evidently, Python 3.13)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13" # Evidently no corre en 3.14 (ver requirements-monitoreo.txt)
+          cache: pip
+          cache-dependency-path: requirements-monitoreo.txt
+      - name: Instalar el ambiente de Evidently (make venv-monitoreo)
+        run: python -m pip install -r requirements-monitoreo.txt
+      - name: Pruebas del reporte de drift con datos sinteticos (make test-monitoreo)
+        run: python -m pytest monitoreo -q
+
+  imagen:
+    name: Imagen de la API (build y prueba de humo)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Solo si el codigo pasa: no tiene caso construir una imagen de codigo que no pasa pruebas
+    needs: calidad
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Instalar dependencias
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements.txt
+      - name: Modelos de prueba en models/servicio (no hay registry ni datos en el CI)
+        run: python scripts/modelos_de_prueba.py
+      - name: Construir la imagen (make image)
+        run: >-
+          docker build -f Containerfile
+          -t mibici-api:ci
+          --label org.opencontainers.image.revision=${{ github.sha }}
+          --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          .
+      - name: Arrancar el contenedor y esperar a que este sano
+        run: |
+          docker run -d --name mibici-api -p 127.0.0.1:8000:8000 mibici-api:ci
+          for intento in $(seq 1 30); do
+            estado=$(docker inspect --format '{{.State.Health.Status}}' mibici-api)
+            echo "intento $intento: $estado"
+            [ "$estado" = "healthy" ] && exit 0
+            [ "$estado" = "unhealthy" ] && break
+            sleep 2
+          done
+          docker logs mibici-api
+          exit 1
+      - name: Pruebas de humo (salud, predicciones y validacion)
+        # Cuando entre docker-compose.yml (#36), esto se reemplaza por python -m operacion.verificar
+        run: |
+          set -euo pipefail
+          URL=http://127.0.0.1:8000
+          revisar() {  # revisar <codigo esperado> <descripcion> <curl args...>
+            esperado=$1; descripcion=$2; shift 2
+            codigo=$(curl -s -o respuesta.json -w '%{http_code}' "$@")
+            echo "$descripcion: HTTP $codigo (esperado $esperado) $(head -c 200 respuesta.json)"
+            [ "$codigo" = "$esperado" ]
+          }
+          revisar 200 "GET /salud" "$URL/salud"
+          grep -q '"estado":"ok"' respuesta.json
+          revisar 200 "GET /modelo" "$URL/modelo"
+          for p in p1 p2 p3; do
+            revisar 200 "POST /predicciones/$p" -X POST "$URL/predicciones/$p" \
+              -H 'Content-Type: application/json' -d @api/ejemplos/peticion_$p.json
+            grep -q '"predicciones"' respuesta.json
+          done
+          revisar 422 "POST /predicciones/p1 invalida" -X POST "$URL/predicciones/p1" \
+            -H 'Content-Type: application/json' -d '{"instancias":[{"hora_dia":30}]}'
+          revisar 200 "GET /docs" "$URL/docs"
+      - name: Usuario y tamano de la imagen
+        run: |
+          echo "usuario: $(docker exec mibici-api id)"
+          docker image ls mibici-api:ci --format 'tamano: {{.Size}}'
+          test "$(docker exec mibici-api id -u)" != "0"
+      - name: Logs del contenedor
+        if: always()
+        run: docker logs mibici-api || true
