@@ -664,15 +664,17 @@ make security
 Equivale a:
 
 ```bash
-pip-audit --skip-editable --strict                 # vulnerabilidades conocidas en dependencias
+pip-audit --skip-editable                          # vulnerabilidades conocidas en dependencias
+pip-audit --strict -r requirements-api.txt         # ... y en las de la imagen de la API
 bandit -r tc5061_proyecto_equipo18 validacion_datos -x validacion_datos/test_validacion.py   # codigo
 python -m pytest tests/test_seguridad.py           # credenciales, archivos sensibles y .gitignore
 ```
 
 - **Dependencias (`pip-audit`).** Revisa todos los paquetes instalados en `.venv`, incluidas las
   dependencias de las dependencias, contra la base de vulnerabilidades de PyPI (OSV).
-  `--skip-editable` omite el propio paquete del proyecto (no esta publicado) y `--strict` falla
-  si algun paquete no se puede revisar. Corre sobre el ambiente instalado con
+  `--skip-editable` omite el propio paquete del proyecto (no esta publicado). Aqui no se usa
+  `--strict`: falla por cualquier paquete omitido, incluido el propio, aunque no haya
+  vulnerabilidades. En `requirements-api.txt` si se usa, porque ahi todo debe poder revisarse. Corre sobre el ambiente instalado con
   `requirements.txt`; actualiza `pip` antes (`make requirements` ya lo hace), porque las
   versiones viejas de `pip` tienen vulnerabilidades propias.
 - **Codigo (`bandit`).** Busca patrones inseguros en el modulo y en `validacion_datos/`. Las

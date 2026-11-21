@@ -174,7 +174,7 @@ abtest:
 ## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
 .PHONY: security
 security:
-	pip-audit --skip-editable --strict
+	pip-audit --skip-editable
 	pip-audit --strict -r requirements-api.txt
 	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) $(wildcard monitoreo) -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
