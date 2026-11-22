@@ -72,6 +72,7 @@ def test_la_api_espera_a_mlflow_y_lo_llama_por_su_nombre():
     permitidos = SERVICIOS["mlflow"]["environment"]["MLFLOW_SERVER_ALLOWED_HOSTS"].split(",")
     assert "mlflow" in permitidos and "mlflow:*" in permitidos  # si no, MLflow rechaza a la API
     assert "/salud" in api["healthcheck"]["test"][-1]
+    assert SERVICIOS["mlflow"]["environment"]["MLFLOW_SERVER_ENABLE_JOB_EXECUTION"] == "false"
 
 
 def test_mlflow_guarda_sus_datos_en_un_volumen_con_nombre():

@@ -37,6 +37,7 @@ services:
       - mlflow-datos:/mlflow # mlflow.db y mlartifacts/ sobreviven a reinicios y a `down`
     environment:
       MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow:*,localhost,localhost:*,127.0.0.1,127.0.0.1:*"
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     healthcheck:
       test:
         - CMD
