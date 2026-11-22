@@ -17,8 +17,8 @@ IMAGEN ?= mibici-api:latest
 PUERTO ?= 8000
 # Preguntas que exporta make export-model (la API sirve las tres)
 PREGUNTAS ?= p1 p2 p3
-# Docker Compose (o Podman Compose) para el sistema completo: make up COMPOSE="podman compose"
-COMPOSE ?= $(CONTAINER) compose
+# Docker Compose para el sistema completo; con Podman: make up COMPOSE="podman compose"
+COMPOSE ?= docker compose
 
 #################################################################################
 # COMMANDS                                                                      #
@@ -134,7 +134,7 @@ run-api:
 ## Start the whole system (API + MLflow) with Docker Compose, one command (needs models/servicio)
 .PHONY: up
 up:
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build --wait
 
 ## Stop the system (the MLflow volume is kept; add -v to delete it)
 .PHONY: down
