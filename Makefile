@@ -198,6 +198,11 @@ abtest:
 carga:
 	$(PYTHON_INTERPRETER) -m carga.ejecutar
 
+## FinOps: cost per inference from the load test results and the week 10 report (after make carga)
+.PHONY: finops
+finops:
+	$(PYTHON_INTERPRETER) -m carga.finops
+
 ## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
 .PHONY: security
 security:

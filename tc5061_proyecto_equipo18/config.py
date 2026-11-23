@@ -548,6 +548,57 @@ CARGA_RESUMEN_JSON = CARGA_DIR / "resumen_carga.json"
 CARGA_ESCALONES_CSV = CARGA_DIR / "escalones.csv"
 CARGA_RECURSOS_CSV = CARGA_DIR / "recursos.csv"
 
+# =============================================================================
+# FinOps: costo por inferencia (semana 10)
+# =============================================================================
+# Precios de lista en USD, consultados el 2026-11-22, sin capa gratuita ni descuentos por
+# compromiso. Verificar antes de usarlos fuera del curso: cambian por region y con el tiempo.
+# - Cloud Run (Google, us-central1, Tier 1): permite exactamente 1 vCPU y 1 GiB, como el limite
+#   de la API en docker-compose.yml, y tiene los dos modos de cobro que se comparan.
+#   https://cloud.google.com/run/pricing
+# - Fargate (AWS, us-east-1, Linux/x86): con 1 vCPU la memoria minima es 2 GB.
+#   https://aws.amazon.com/fargate/pricing/
+FINOPS_PRECIOS = {
+    "cloud_run_instancia": {
+        "nombre": "Cloud Run, cobro por instancia (siempre encendida)",
+        "vcpu_seg": 0.000018,
+        "gib_seg": 0.000002,
+        "vcpu": 1.0,
+        "gib": 1.0,
+        "por_millon_peticiones": 0.0,
+    },
+    "cloud_run_peticion": {
+        "nombre": "Cloud Run, cobro por peticion (escala a cero)",
+        "vcpu_seg": 0.000024,
+        "gib_seg": 0.0000025,
+        "vcpu": 1.0,
+        "gib": 1.0,
+        "por_millon_peticiones": 0.40,
+    },
+    "fargate": {
+        "nombre": "AWS Fargate (1 vCPU, 2 GB, siempre encendida)",
+        "vcpu_seg": 0.04048 / 3600,
+        "gib_seg": 0.004445 / 3600,
+        "vcpu": 1.0,
+        "gib": 2.0,
+        "por_millon_peticiones": 0.0,
+    },
+}
+# Con cobro por peticion, cada intervalo facturable se redondea hacia arriba a 100 ms
+FINOPS_REDONDEO_SEG = 0.1
+# Demanda esperada de MiBici, segun la estrategia de despliegue del README (supuestos, no medidos):
+# - P1: un lote nocturno con las estaciones activas x 24 horas del dia siguiente.
+# - P2: despachadores consultando el riesgo de 20 estaciones una vez por minuto en el horario
+#   de operacion.
+# - P3: un lote al mes con todas las estaciones.
+FINOPS_ESTACIONES = 470
+FINOPS_DESPACHADORES = 10
+FINOPS_CONSULTAS_POR_MIN = 1
+FINOPS_HORAS_OPERACION = 16
+FINOPS_DIAS_MES = 30
+FINOPS_JSON = CARGA_DIR / "finops.json"
+REPORTE_CARGA_FINOPS_MD = REPORTS_DIR / "reporte_carga_finops.md"
+
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135
 try:
