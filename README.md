@@ -68,6 +68,7 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |-- requirements-api.txt          <- Dependencias de la imagen de la API (mismas versiones)
 |
 |-- api/                          <- API FastAPI: main.py, esquemas.py, modelo.py y ejemplos/ de peticiones
+|-- carga/                        <- Prueba de carga: locustfile.py (Locust), docker stats y graficas
 |
 |-- data/                         <- Ignorado por Git, se genera con la ingesta
 |   |-- raw/                      <- CSV originales, tal como los publica MiBici
@@ -671,6 +672,82 @@ docker compose stop mlflow
 docker compose run --rm --no-deps -v "${PWD}:/origen:ro" mlflow sh -c "cp /origen/mlflow.db /mlflow/mlflow.db && cp -r /origen/mlartifacts/. /mlflow/mlartifacts/"
 docker compose up -d
 ```
+
+## Prueba de carga y uso de recursos (semana 10)
+
+`make carga` simula usuarios con [Locust](https://locust.io) contra la API que esta corriendo.
+Al mismo tiempo registra el CPU y la memoria de los contenedores con `docker stats`. Al final
+genera un resumen con graficas de latencia, peticiones por segundo, tasa de error y recursos. El
+codigo esta en `carga/`; los parametros, en `config.py` (`CARGA_*`).
+
+### Escenario
+
+Sigue la [estrategia de despliegue](#estrategia-de-despliegue-tiempo-real-o-por-lotes): P2 se usa
+en tiempo real; P1 y P3, por lotes.
+
+| Usuario simulado | Cuantos | Que pide | Pausa entre peticiones |
+|---|---|---|---|
+| `Despachador` (tablero de rebalanceo) | Todos menos uno | `POST /predicciones/p2` con 20 estaciones (90 %) y `GET /salud` (10 %) | 0.5 a 1.5 s |
+| `ProcesoPorLotes` (proceso programado) | Siempre 1 | Lotes de P1 de 1000 filas (75 %) y de P3 con 470 estaciones (25 %) | 5 a 10 s |
+
+- Cada fila parte de los ejemplos de `api/ejemplos/` y cambia al azar la estacion, la hora o el
+  bloque y el dia, siempre dentro de lo que acepta la API.
+- Una respuesta cuenta como error si no es 200 o si no trae una prediccion por fila.
+- **Escalones.** Los usuarios suben por escalones: 10, 50, 100, 200, 300 y 400, de 40 s cada
+  uno, unos 4 minutos en total. Asi se ve en que punto se satura la API, que en
+  `docker-compose.yml` tiene un limite de 1 vCPU y 1 GiB.
+- **Calentamiento.** Los primeros 5 s de cada escalon no cuentan en el resumen, porque los
+  usuarios todavia van llegando.
+- **Objetivo de servicio.** Un escalon cumple si el p95 de las peticiones en tiempo real no pasa
+  de 500 ms y menos del 1 % de las peticiones falla. Los lotes no cuentan en el p95: no hay nadie
+  esperando su respuesta.
+- **Capacidad.** Es el mayor numero de predicciones por segundo de un escalon que cumple el
+  objetivo. Es el dato que usa el analisis FinOps.
+
+### Correrla
+
+Con el sistema arriba (`make up`; o `make run-api` si solo necesitas la API, sin limite de
+CPU):
+
+```bash
+make up              # API + MLflow con los modelos exportados en models/servicio
+make carga           # ~4 min; escribe reports/carga/ y reports/figures/carga/
+```
+
+Variables utiles:
+
+```bash
+CARGA_ESCALONES=10:15,50:15 make carga    # corrida corta para probar
+CARGA_FILAS_P2=1 make carga               # una estacion por peticion (sin agrupar)
+CARGA_URL=http://127.0.0.1:8001 make carga
+CONTAINER=podman make carga               # podman stats en lugar de docker stats
+```
+
+Para ver Locust en vivo en su interfaz web (http://localhost:8089):
+
+```bash
+locust -f carga/locustfile.py --host http://127.0.0.1:8000
+```
+
+La corrida que se reporta debe usar los champions exportados (`make export-model`). Si la API
+sirve los modelos de prueba del CI, el resumen lo advierte al inicio. Para que las cifras no se
+alteren, no corras otros procesos pesados durante la prueba: Locust y Docker comparten la misma
+computadora.
+
+### Salidas
+
+| Archivo | Contenido | En Git |
+|---|---|---|
+| `reports/carga/resumen_carga.md` | Resumen: capacidad, tablas por escalon, por endpoint y de recursos, y graficas | Si |
+| `reports/carga/resumen_carga.json` | Lo mismo en JSON, mas el entorno (modelos, limites del contenedor, maquina) | Si |
+| `reports/carga/escalones.csv` | Por escalon: RPS, predicciones/s, p50/p95/p99, p95 de lotes, errores, CPU y memoria de la API | Si |
+| `reports/carga/recursos.csv` | Muestras de `docker stats` (~cada 2 s): CPU, memoria y red de cada contenedor | Si |
+| `reports/figures/carga/*.png` | Usuarios, RPS, latencia y errores en el tiempo; capacidad por escalon; CPU y memoria | Si |
+| `reports/carga/crudos/` | Una fila por peticion, CSV de Locust y su reporte HTML | No (se regenera) |
+
+- Los percentiles se calculan con el tiempo de cada peticion, no con los promedios por ventana
+  que reporta Locust.
+- `cpu_pct` es relativo a un nucleo: 100 % equivale a la vCPU completa del limite de la API.
 
 ## Flujo de trabajo con Git y GitHub
 
