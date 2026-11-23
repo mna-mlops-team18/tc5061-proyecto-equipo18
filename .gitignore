@@ -241,3 +241,7 @@ mlflow.db-shm
 
 # Figuras locales del experimento base de la entrega 1 (ahora solo viven en MLflow)
 reports/figures/experimento_base/
+
+# Prueba de carga: CSV crudos y HTML de Locust (se regeneran con make carga; el resumen, los
+# escalones, los recursos y las figuras si se versionan)
+reports/carga/crudos/

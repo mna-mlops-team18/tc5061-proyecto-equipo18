@@ -504,6 +504,50 @@ AB_TOLERANCIA_CONOCIDAS = 0.01
 # Monitoreo del desempeno del champion mes a mes: validacion (abr-jun) y periodo actual (jul-sep)
 MONITOREO_MENSUAL = ("2026-04-01", "2026-09-30")
 
+# =============================================================================
+# Prueba de carga (Locust) y uso de recursos (docker stats), semana 10
+# =============================================================================
+# API contra la que se corre la prueba (la de `make up` o `make run-api`)
+CARGA_URL = os.getenv("CARGA_URL", "http://127.0.0.1:8000")
+# Escalones de usuarios concurrentes, "usuarios:segundos" separados por comas. Cada escalon se
+# sostiene el tiempo indicado; los primeros CARGA_CALENTAMIENTO_SEG de cada uno no cuentan en el
+# resumen (los usuarios todavia van llegando). Una corrida corta para probar:
+# CARGA_ESCALONES=5:15,20:15 make carga
+CARGA_ESCALONES_TEXTO = os.getenv("CARGA_ESCALONES", "10:40,50:40,100:40,200:40,300:40,400:40")
+CARGA_ESCALONES = [
+    (int(usuarios), int(segundos))
+    for usuarios, segundos in (escalon.split(":") for escalon in CARGA_ESCALONES_TEXTO.split(","))
+]
+CARGA_CALENTAMIENTO_SEG = 5
+# Escenario, segun la estrategia de despliegue (README > Estrategia de despliegue):
+# - Despachadores de rebalanceo (tiempo real): casi todos los usuarios. Piden el riesgo de P2 de
+#   las estaciones que estan viendo (CARGA_FILAS["p2"] por peticion) y de vez en cuando /salud;
+#   esperan CARGA_ESPERA_SEG entre peticiones.
+# - Proceso por lotes: UN usuario fijo que manda lotes de P1 (estaciones x horas del dia
+#   siguiente, en peticiones de 1000 filas, el maximo de la API) y de P3 (todas las estaciones),
+#   al mismo tiempo que el trafico en tiempo real.
+CARGA_ESPERA_SEG = (0.5, 1.5)
+CARGA_PESOS = {"p2": 9, "salud": 1}
+CARGA_ESPERA_LOTES_SEG = (5.0, 10.0)
+CARGA_PESOS_LOTES = {"p1": 3, "p3": 1}
+# Filas por peticion. CARGA_FILAS_P2 permite medir el efecto de agrupar (FinOps).
+CARGA_FILAS = {"p2": int(os.getenv("CARGA_FILAS_P2", "20")), "p1": 1000, "p3": 470}
+# Contenedores cuyo CPU y memoria se registran durante la prueba (nombres de docker-compose.yml)
+CARGA_CONTENEDORES = ("mibici-api", "mibici-mlflow")
+# Objetivo de servicio: un escalon "cumple" si el p95 de las peticiones en tiempo real (los lotes
+# no tienen a nadie esperando) y la tasa de error de todas no pasan de estos valores. La capacidad
+# de la instancia es el mayor numero de predicciones por segundo de un escalon que cumple.
+CARGA_SLO_P95_MS = 500
+CARGA_SLO_ERRORES = 0.01
+# Salidas: los CSV crudos y el HTML de Locust se ignoran en Git (se regeneran); el resumen, los
+# escalones, los recursos y las figuras si se versionan.
+CARGA_DIR = REPORTS_DIR / "carga"
+CARGA_CRUDOS_DIR = CARGA_DIR / "crudos"
+CARGA_FIGURAS_DIR = FIGURES_DIR / "carga"
+CARGA_RESUMEN_JSON = CARGA_DIR / "resumen_carga.json"
+CARGA_ESCALONES_CSV = CARGA_DIR / "escalones.csv"
+CARGA_RECURSOS_CSV = CARGA_DIR / "recursos.csv"
+
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135
 try:

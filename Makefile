@@ -193,12 +193,17 @@ retrain:
 abtest:
 	mlflow run . -e abtest -P promover=$(PROMOVER) --env-manager local
 
+## Load test of the running API with Locust + CPU/memory with docker stats (needs make up)
+.PHONY: carga
+carga:
+	$(PYTHON_INTERPRETER) -m carga.ejecutar
+
 ## Security checks: known vulnerabilities (pip-audit), code analysis (bandit) and repo secrets
 .PHONY: security
 security:
 	pip-audit --skip-editable
 	pip-audit --strict -r requirements-api.txt
-	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) $(wildcard monitoreo) -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
+	bandit -r tc5061_proyecto_equipo18 $(wildcard validacion_datos) $(wildcard monitoreo) $(wildcard carga) -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
 	$(PYTHON_INTERPRETER) -m pytest tests/test_seguridad.py
 
 

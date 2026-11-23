@@ -15,6 +15,7 @@ matplotlib==3.11.2
 fastapi==0.162.0
 uvicorn==0.54.0
 httpx==0.28.1  # lo usa el TestClient de FastAPI en tests/test_api.py
+locust==2.47.0  # prueba de carga de la API (make carga)
 
 # Ingesta y linea de comandos
 requests==2.34.2
