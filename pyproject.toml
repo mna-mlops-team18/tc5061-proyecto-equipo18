@@ -37,6 +37,7 @@ include = [
     "validacion_datos/**/*.py",
     "monitoreo/**/*.py",
     "operacion/**/*.py",
+    "carga/**/*.py",
 ]
 
 [tool.ruff.lint]
@@ -49,6 +50,7 @@ known-first-party = [
     "api",
     "monitoreo",
     "operacion",
+    "carga",
 ]
 force-sort-within-sections = true
 
