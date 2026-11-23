@@ -213,6 +213,12 @@ def test_genera_resumen_tablas_y_graficas(corrida):
     endpoints = {e["endpoint"]: e for e in guardado["por_endpoint"]}
     assert set(endpoints) == {"/predicciones/p1 [lote]", "/predicciones/p2", "/salud"}
     assert endpoints["/predicciones/p1 [lote]"]["filas_por_peticion"] == 1000
+    # Tiempo de servicio sin cola: solo el escalon de 10 usuarios (sin los lentos de 100)
+    sin_saturar = {e["endpoint"]: e for e in guardado["por_endpoint_sin_saturar"]}
+    assert sin_saturar["/predicciones/p2"]["p95_ms"] < 30
+    assert (
+        sin_saturar["/predicciones/p2"]["peticiones"] < endpoints["/predicciones/p2"]["peticiones"]
+    )
     assert set(guardado["recursos"]) == {"mibici-api", "mibici-mlflow"}
     assert len(pd.read_csv(destino / "escalones.csv")) == 3
     assert len(pd.read_csv(destino / "recursos.csv")) == 60
