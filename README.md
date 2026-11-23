@@ -3,6 +3,9 @@
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
+<a href="https://github.com/mna-mlops-team18/tc5061-proyecto-equipo18/actions/workflows/ci.yml">
+    <img src="https://github.com/mna-mlops-team18/tc5061-proyecto-equipo18/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
+</a>
 
 Propuesta de MLOps sobre la operacion de [MiBici](https://mibici.net/es/datos-abiertos/), el
 sistema de bicicleta publica del Area Metropolitana de Guadalajara. Proyecto del equipo 18 de
@@ -51,7 +54,7 @@ alcanza el 50 % de la capacidad de la estacion, suponiendo que arranca a media c
 Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drivendata.org/).
 
 ```
-|-- .github/                      <- Plantilla de Pull Request
+|-- .github/                      <- Plantilla de Pull Request y workflows/ci.yml (CI/CD)
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
 |-- Containerfile                 <- Imagen de la API (Podman o Docker)
 |-- docker-compose.yml            <- Sistema completo con un comando: API + MLflow (+ Locust, perfil carga)
@@ -679,7 +682,9 @@ Seguimos [GitHub Flow](https://docs.github.com/en/get-started/using-github/githu
    con la plantilla de `.github/pull_request_template.md` completa.
 3. Cada integrante abre al menos un Pull Request y revisa al menos uno de otra persona. Una
    revision util nombra algo concreto: un comando que se corrio, un riesgo, una pregunta.
-4. Se integra con _squash and merge_ y se borra la rama.
+4. El workflow de CI (ver [Integracion continua](#integracion-continua-cicd)) corre en cada
+   Pull Request; antes de aprobar, el revisor confirma que este en verde.
+5. Se integra con _squash and merge_ y se borra la rama.
 
 **Ramas:** `tipo/descripcion-corta-en-minusculas`, por ejemplo `feat/ingesta-reproducible`.
 
@@ -728,15 +733,17 @@ make security
 Equivale a:
 
 ```bash
-pip-audit --skip-editable --strict                 # vulnerabilidades conocidas en dependencias
+pip-audit --skip-editable                          # vulnerabilidades conocidas en dependencias
+pip-audit --strict -r requirements-api.txt         # ... y en las de la imagen de la API
 bandit -r tc5061_proyecto_equipo18 validacion_datos -x validacion_datos/test_validacion.py   # codigo
 python -m pytest tests/test_seguridad.py           # credenciales, archivos sensibles y .gitignore
 ```
 
 - **Dependencias (`pip-audit`).** Revisa todos los paquetes instalados en `.venv`, incluidas las
   dependencias de las dependencias, contra la base de vulnerabilidades de PyPI (OSV).
-  `--skip-editable` omite el propio paquete del proyecto (no esta publicado) y `--strict` falla
-  si algun paquete no se puede revisar. Corre sobre el ambiente instalado con
+  `--skip-editable` omite el propio paquete del proyecto (no esta publicado). Aqui no se usa
+  `--strict`: falla por cualquier paquete omitido, incluido el propio, aunque no haya
+  vulnerabilidades. En `requirements-api.txt` si se usa, porque ahi todo debe poder revisarse. Corre sobre el ambiente instalado con
   `requirements.txt`; actualiza `pip` antes (`make requirements` ya lo hace), porque las
   versiones viejas de `pip` tienen vulnerabilidades propias.
 - **Codigo (`bandit`).** Busca patrones inseguros en el modulo y en `validacion_datos/`. Las
@@ -759,6 +766,49 @@ python -m pytest tests/test_seguridad.py           # credenciales, archivos sens
 
 Los resultados de la ultima revision (incluido el historial completo de Git) estan en
 `reports/seguridad/resumen_seguridad.md`.
+
+## Integracion continua (CI/CD)
+
+`.github/workflows/ci.yml` corre en GitHub Actions en cada push a `main`, en cada Pull Request
+y a mano (pestana **Actions** > **CI** > **Run workflow**). Los resultados se ven en la pestana
+Actions y en los checks de cada Pull Request; el distintivo del inicio de este README muestra el
+estado de `main`.
+
+| Job | Que hace | Equivale a |
+|---|---|---|
+| `calidad` | Instala `requirements.txt` con Python 3.14, revisa formato y lint con ruff y corre todas las pruebas (`tests/`). Guarda el reporte JUnit como artefacto del run. | `make lint` y `make test` |
+| `seguridad` | `pip-audit` de `requirements.txt` y de `requirements-api.txt` (la imagen), y `bandit` del codigo (incluida `api/`). | `make security` |
+| `monitoreo` | Instala el ambiente de Evidently (Python 3.13) y corre las pruebas del reporte de drift con datos sinteticos. | `make test-monitoreo` |
+| `imagen` | Si `calidad` pasa: genera modelos de prueba, construye la imagen con el `Containerfile`, la arranca, espera a que este sana y prueba `/salud`, `/modelo`, las tres predicciones, una peticion invalida (422) y `/docs`. Tambien comprueba que el contenedor no corre como root. | `make image` y `make run-api` |
+
+Detalles:
+
+- **Sin datos ni registry.** En el CI no hay datos de MiBici ni servidor de MLflow. Las pruebas
+  usan datos sinteticos y MLflow en SQLite temporal; las que necesitan datos reales se omiten
+  con un mensaje (se ven con `-rs` en el log). Para la imagen, `scripts/modelos_de_prueba.py`
+  escribe en `models/servicio/` modelos pequenos con las mismas columnas, firma y
+  `registro.json` que los exportados: prueban que la imagen se construye y sirve, no el
+  desempeno del modelo. La imagen con los champions reales se construye localmente con
+  `make export-model && make image`.
+- **DeepChecks no corre en el CI:** sin datos todas sus pruebas se omiten, y su ambiente
+  (Python 3.12, `numpy<2`) tarda mas en instalarse que lo que aportaria. Se corre localmente
+  con `make validate`.
+- **Seguridad del workflow.** Permisos de solo lectura (`contents: read`): el workflow no publica
+  nada ni escribe en el repositorio. Las acciones se fijan por commit, no por etiqueta, para
+  que una etiqueta movida no cambie lo que corre. Un push nuevo cancela el run anterior de la
+  misma rama.
+- **CD.** El workflow construye y prueba la imagen en cada cambio; no la publica en un
+  registro de contenedores. El despliegue es local, con la imagen (`make run-api`) o con
+  Docker Compose.
+
+Para repetir el job `imagen` en tu computadora (sin pisar modelos exportados: el script no
+sobrescribe una carpeta que ya tenga un modelo, salvo con `--reemplazar`):
+
+```bash
+python scripts/modelos_de_prueba.py
+make image CONTAINER=docker
+make run-api CONTAINER=docker
+```
 
 ## Integrantes y roles
 
