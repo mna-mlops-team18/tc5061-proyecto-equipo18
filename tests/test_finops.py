@@ -1,4 +1,4 @@
-"""Pruebas del analisis FinOps: precios, demanda, costo por inferencia y reporte."""
+"""Pruebas del analisis FinOps: precios, demanda, costo por inferencia y grafica."""
 
 import json
 
@@ -157,25 +157,9 @@ def test_memoria_sugerida(usada, sugerida):
     assert finops.memoria_sugerida(usada) == sugerida
 
 
-def test_texto_de_escalones():
-    assert finops.texto_escalones([[10, 40], [50, 40]]) == "10 y 50 usuarios, 40 s cada uno"
-    assert finops.texto_escalones(None) == "-"
-
-
-@pytest.mark.parametrize("de_prueba", [True, False])
-def test_reporte_completo(tmp_path, de_prueba):
-    resumen = resumen_de_prueba(modelos_de_prueba=de_prueba)
-    analisis_ = finops.analizar(resumen)
-    figura = tmp_path / "figuras" / "costo_mensual.png"
-    figura.parent.mkdir()
+def test_grafica_de_costo_mensual(tmp_path):
+    analisis_ = finops.analizar(resumen_de_prueba())
+    figura = tmp_path / "costo_mensual.png"
     finops.grafica_costo_mensual(analisis_, figura)
     assert figura.stat().st_size > 10_000
-
-    texto = finops.reporte(resumen, analisis_, figura, tmp_path / "reporte.md")
-    assert texto.isascii()
-    for seccion in ("## 2. Resultados", "## 3. Uso de recursos", "## 4. FinOps", "## 5. Como"):
-        assert seccion in texto
-    assert ("modelos de prueba" in texto) is de_prueba
-    assert "figuras/costo_mensual.png" in texto
-    assert "0.0200" in texto  # USD por millon a plena capacidad en Cloud Run siempre encendida
     json.dumps(analisis_)  # el analisis se puede guardar como JSON

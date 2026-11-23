@@ -597,7 +597,6 @@ FINOPS_CONSULTAS_POR_MIN = 1
 FINOPS_HORAS_OPERACION = 16
 FINOPS_DIAS_MES = 30
 FINOPS_JSON = CARGA_DIR / "finops.json"
-REPORTE_CARGA_FINOPS_MD = REPORTS_DIR / "reporte_carga_finops.md"
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135

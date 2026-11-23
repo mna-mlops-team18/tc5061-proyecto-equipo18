@@ -749,17 +749,16 @@ computadora.
   que reporta Locust.
 - `cpu_pct` es relativo a un nucleo: 100 % equivale a la vCPU completa del limite de la API.
 
-## Analisis FinOps y reporte de la semana 10
+## Analisis FinOps
 
 `make finops` toma la capacidad medida por `make carga` y estima cuanto cuesta cada inferencia
-(una prediccion, es decir, una fila). Escribe el reporte completo de la semana 10 en
-`reports/reporte_carga_finops.md`: escenario, resultados de la prueba de carga con sus graficas,
-uso de recursos, costos y optimizaciones.
+(una prediccion, es decir, una fila). Sus salidas, junto con las de `make carga`, son los
+insumos del reporte de la semana 10, que se entrega en PDF.
 
 ```bash
 make up              # sistema arriba con los champions exportados (make export-model)
 make carga           # prueba de carga + docker stats (~4 min)
-make finops          # costo por inferencia y reporte (segundos)
+make finops          # costo por inferencia (segundos)
 ```
 
 Que calcula (`carga/finops.py`; precios y supuestos en `config.FINOPS_*`):
@@ -782,8 +781,9 @@ Precios de referencia, en USD de lista, consultados el 2026-11-22 y sin capa gra
 
 Si cambian los precios o la demanda supuesta (despachadores, consultas por minuto, horas de
 operacion), basta editar `config.py` y volver a correr `make finops`; no hace falta repetir la
-prueba de carga. Salidas: `reports/carga/finops.json`, `reports/figures/carga/costo_mensual.png`
-y `reports/reporte_carga_finops.md` (todas en Git).
+prueba de carga. Salidas: `reports/carga/finops.json` (costos por opcion, demanda, utilizacion,
+ms y CPU por prediccion, memoria sugerida) y `reports/figures/carga/costo_mensual.png`, ambas en
+Git.
 
 ## Flujo de trabajo con Git y GitHub
 
