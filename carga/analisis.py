@@ -198,6 +198,18 @@ def recursos_por_contenedor(recursos: pd.DataFrame) -> dict:
     return resumen
 
 
+def sin_saturar(
+    peticiones: pd.DataFrame, calentamiento: float = config.CARGA_CALENTAMIENTO_SEG
+) -> pd.DataFrame:
+    """Peticiones del escalon con menos usuarios, sin su calentamiento: el tiempo de servicio de
+    cada endpoint sin cola (lo usa FinOps para estimar el cobro por peticion)."""
+    activos = peticiones[peticiones["usuarios"] > 0]
+    if activos.empty:
+        return activos
+    grupo = activos[activos["usuarios"] == activos["usuarios"].min()]
+    return grupo[grupo["segundo"] >= grupo["segundo"].min() + calentamiento]
+
+
 def resumir(peticiones: pd.DataFrame, recursos: pd.DataFrame, entorno: dict | None = None):
     """(resumen para JSON, escalones, serie por segundo)."""
     escalones = por_escalon(peticiones, recursos)
@@ -214,6 +226,7 @@ def resumir(peticiones: pd.DataFrame, recursos: pd.DataFrame, entorno: dict | No
         "slo": {"p95_ms": config.CARGA_SLO_P95_MS, "tasa_error": config.CARGA_SLO_ERRORES},
         "capacidad": capacidad(escalones),
         "por_endpoint": por_endpoint(peticiones),
+        "por_endpoint_sin_saturar": por_endpoint(sin_saturar(peticiones)),
         "escalones": escalones.to_dict(orient="records"),
         "recursos": recursos_por_contenedor(recursos),
         "entorno": entorno or {},
@@ -224,7 +237,7 @@ def resumir(peticiones: pd.DataFrame, recursos: pd.DataFrame, entorno: dict | No
 # =============================================================================
 # Graficas
 # =============================================================================
-def _estilo(ax, titulo: str, unidad: str):
+def estilo(ax, titulo: str, unidad: str):
     ax.set_facecolor(FONDO)
     ax.set_title(titulo, loc="left", fontsize=10, color=TINTA)
     ax.set_ylabel(unidad, fontsize=8, color=TINTA_SECUNDARIA)
@@ -244,7 +257,7 @@ def _figura(paneles: int, alto: float = 2.0):
 
 def _panel_usuarios(ax, serie: pd.DataFrame):
     ax.step(serie["segundo"], serie["usuarios"], where="post", color=TINTA_SECUNDARIA, lw=1.5)
-    _estilo(ax, "Usuarios concurrentes", "usuarios")
+    estilo(ax, "Usuarios concurrentes", "usuarios")
 
 
 def grafica_en_el_tiempo(serie: pd.DataFrame, ruta: Path):
@@ -254,7 +267,7 @@ def grafica_en_el_tiempo(serie: pd.DataFrame, ruta: Path):
 
     rps.plot(serie["segundo"], serie["rps"], color=COLORES[0], lw=1.5)
     rps.set_ylim(bottom=0)
-    _estilo(rps, "Peticiones atendidas por segundo (RPS)", "peticiones/s")
+    estilo(rps, "Peticiones atendidas por segundo (RPS)", "peticiones/s")
 
     for color, p in zip(COLORES, PERCENTILES, strict=False):
         latencia.plot(serie["segundo"], serie[f"p{p}_ms"], color=color, lw=1.5, label=f"p{p}")
@@ -269,11 +282,11 @@ def grafica_en_el_tiempo(serie: pd.DataFrame, ruta: Path):
         color=TINTA_SECUNDARIA,
     )
     latencia.legend(frameon=False, fontsize=8, ncol=3, loc="center left")
-    _estilo(latencia, "Latencia de las peticiones en tiempo real (sin lotes)", "ms")
+    estilo(latencia, "Latencia de las peticiones en tiempo real (sin lotes)", "ms")
 
     errores.plot(serie["segundo"], 100 * serie["tasa_error"], color=COLORES[3], lw=1.5)
     errores.set_ylim(0, max(2.0, 110 * serie["tasa_error"].max()))  # escala visible sin errores
-    _estilo(errores, "Tasa de error", "% de peticiones")
+    estilo(errores, "Tasa de error", "% de peticiones")
     errores.set_xlabel("segundos desde el inicio de la prueba", fontsize=8, color=TINTA_SECUNDARIA)
 
     figura.tight_layout()
@@ -286,14 +299,14 @@ def grafica_escalones(escalones: pd.DataFrame, ruta: Path):
     figura, (rps, predicciones, p95) = plt.subplots(1, 3, figsize=(11, 3.2), facecolor=FONDO)
     x = escalones["usuarios"]
     rps.plot(x, escalones["rps"], color=COLORES[0], lw=1.5, marker="o", ms=5)
-    _estilo(rps, "Peticiones por segundo", "peticiones/s")
+    estilo(rps, "Peticiones por segundo", "peticiones/s")
     predicciones.plot(
         x, escalones["predicciones_por_seg"], color=COLORES[2], lw=1.5, marker="o", ms=5
     )
-    _estilo(predicciones, "Predicciones (filas) por segundo", "predicciones/s")
+    estilo(predicciones, "Predicciones (filas) por segundo", "predicciones/s")
     p95.plot(x, escalones["p95_ms"], color=COLORES[1], lw=1.5, marker="o", ms=5)
     p95.axhline(config.CARGA_SLO_P95_MS, color=TINTA_SECUNDARIA, lw=1, ls="--")
-    _estilo(p95, f"p95 en tiempo real (objetivo {config.CARGA_SLO_P95_MS} ms)", "ms")
+    estilo(p95, f"p95 en tiempo real (objetivo {config.CARGA_SLO_P95_MS} ms)", "ms")
     for ax in (rps, predicciones, p95):
         ax.set_ylim(bottom=0)
         ax.set_xlabel("usuarios concurrentes", fontsize=8, color=TINTA_SECUNDARIA)
@@ -316,8 +329,8 @@ def grafica_recursos(recursos: pd.DataFrame, serie: pd.DataFrame, ruta: Path):
         "1 vCPU", (0, 100), xytext=(2, 3), textcoords="offset points", fontsize=7,
         color=TINTA_SECUNDARIA,
     )  # fmt: skip
-    _estilo(cpu, "CPU (docker stats)", "% de 1 vCPU")
-    _estilo(memoria, "Memoria (docker stats)", "MiB")
+    estilo(cpu, "CPU (docker stats)", "% de 1 vCPU")
+    estilo(memoria, "Memoria (docker stats)", "MiB")
     for ax in (cpu, memoria):
         if recursos["contenedor"].nunique() > 1:
             ax.legend(frameon=False, fontsize=8, loc="upper left")
@@ -331,7 +344,7 @@ def grafica_recursos(recursos: pd.DataFrame, serie: pd.DataFrame, ruta: Path):
 # =============================================================================
 # Reporte
 # =============================================================================
-def _tabla(filas: list[dict], columnas: list[tuple[str, str]]) -> str:
+def tabla(filas: list[dict], columnas: list[tuple[str, str]]) -> str:
     def celda(valor):
         if isinstance(valor, bool):
             return "si" if valor else "no"
@@ -403,7 +416,7 @@ def markdown(resumen: dict, figuras: dict[str, Path], destino: Path) -> str:
         "",
         "p50, p95 y p99: peticiones en tiempo real (P2 y /salud); los lotes van aparte.",
         "",
-        _tabla(
+        tabla(
             resumen["escalones"],
             [
                 ("usuarios", "Usuarios"),
@@ -422,7 +435,7 @@ def markdown(resumen: dict, figuras: dict[str, Path], destino: Path) -> str:
         "",
         "## Por endpoint (toda la prueba)",
         "",
-        _tabla(
+        tabla(
             resumen["por_endpoint"],
             [
                 ("endpoint", "Endpoint"),
@@ -438,7 +451,7 @@ def markdown(resumen: dict, figuras: dict[str, Path], destino: Path) -> str:
         "",
         "## Recursos (docker stats)",
         "",
-        _tabla(
+        tabla(
             [{"contenedor": k, **v} for k, v in resumen["recursos"].items()],
             [
                 ("contenedor", "Contenedor"),
