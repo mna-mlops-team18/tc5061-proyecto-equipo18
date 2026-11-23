@@ -85,7 +85,7 @@ jobs:
           pip-audit --strict --timeout 60 -r requirements-api.txt
       - name: Analisis estatico del codigo (bandit)
         run: >-
-          bandit -r tc5061_proyecto_equipo18 validacion_datos monitoreo api
+          bandit -r tc5061_proyecto_equipo18 validacion_datos monitoreo api carga
           -x validacion_datos/test_validacion.py,monitoreo/test_drift.py
 
   monitoreo:

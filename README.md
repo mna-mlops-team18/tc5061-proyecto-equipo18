@@ -57,7 +57,7 @@ Generada con [Cookiecutter Data Science](https://cookiecutter-data-science.drive
 |-- .github/                      <- Plantilla de Pull Request y workflows/ci.yml (CI/CD)
 |-- .env.example                  <- Variables de entorno de ejemplo (copiar a .env)
 |-- Containerfile                 <- Imagen de la API (Podman o Docker)
-|-- docker-compose.yml            <- Sistema completo con un comando: API + MLflow (+ Locust, perfil carga)
+|-- docker-compose.yml            <- Sistema completo con un comando: API + MLflow
 |-- .dockerignore                 <- Lista de permitidos del contexto de construccion de la imagen
 |-- Makefile                      <- Atajos para Linux y macOS: make mlflow-server, make train, make test
 |-- MLproject                     <- MLflow Project: puntos de entrada ingest, features, train y search
@@ -854,7 +854,7 @@ estado de `main`.
 | Job | Que hace | Equivale a |
 |---|---|---|
 | `calidad` | Instala `requirements.txt` con Python 3.14, revisa formato y lint con ruff y corre todas las pruebas (`tests/`). Guarda el reporte JUnit como artefacto del run. | `make lint` y `make test` |
-| `seguridad` | `pip-audit` de `requirements.txt` y de `requirements-api.txt` (la imagen), y `bandit` del codigo (incluida `api/`). | `make security` |
+| `seguridad` | `pip-audit` de `requirements.txt` y de `requirements-api.txt` (la imagen), y `bandit` del codigo (incluidas `api/` y `carga/`). | `make security` |
 | `monitoreo` | Instala el ambiente de Evidently (Python 3.13) y corre las pruebas del reporte de drift con datos sinteticos. | `make test-monitoreo` |
 | `imagen` | Si `calidad` pasa: genera modelos de prueba, construye la imagen con el `Containerfile`, la arranca, espera a que este sana y prueba `/salud`, `/modelo`, las tres predicciones, una peticion invalida (422) y `/docs`. Tambien comprueba que el contenedor no corre como root. | `make image` y `make run-api` |
 
