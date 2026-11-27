@@ -1,0 +1,85 @@
+{
+  "capacidad": {
+    "usuarios": 50,
+    "rps": 46.48,
+    "predicciones_por_seg": 961.4,
+    "p95_ms": 281.2,
+    "tasa_error": 0.0,
+    "cpu_api_pct": 57.6
+  },
+  "demanda": {
+    "p1": {
+      "peticiones": 360,
+      "predicciones": 338400,
+      "modo": "lote nocturno"
+    },
+    "p2": {
+      "peticiones": 288000,
+      "predicciones": 5760000,
+      "modo": "tiempo real"
+    },
+    "p3": {
+      "peticiones": 1,
+      "predicciones": 470,
+      "modo": "lote mensual"
+    },
+    "total": {
+      "peticiones": 288361,
+      "predicciones": 6098870
+    },
+    "pico_predicciones_por_seg": 3.333333333333333
+  },
+  "utilizacion_pico": 0.003467,
+  "costos": {
+    "cloud_run_instancia": {
+      "nombre": "Cloud Run, cobro por instancia (siempre encendida)",
+      "usd_hora": 0.072,
+      "usd_millon_predicciones_capacidad": 0.0208,
+      "usd_mes": 51.84,
+      "usd_millon_predicciones_demanda": 8.4999
+    },
+    "cloud_run_peticion": {
+      "nombre": "Cloud Run, cobro por peticion (escala a cero)",
+      "usd_hora": 0.0954,
+      "usd_millon_predicciones_capacidad": 0.1525,
+      "usd_mes": 0.88,
+      "usd_millon_predicciones_demanda": 0.1442
+    },
+    "fargate": {
+      "nombre": "AWS Fargate (1 vCPU, 2 GB, siempre encendida)",
+      "usd_hora": 0.04937,
+      "usd_millon_predicciones_capacidad": 0.0143,
+      "usd_mes": 35.55,
+      "usd_millon_predicciones_demanda": 5.8284
+    }
+  },
+  "servicio_sin_cola": {
+    "/predicciones/p1 [lote]": {
+      "p50_ms": 54.6,
+      "filas": 1000.0
+    },
+    "/predicciones/p2": {
+      "p50_ms": 24.2,
+      "filas": 20.0
+    },
+    "/predicciones/p3 [lote]": {
+      "p50_ms": 207.1,
+      "filas": 470.0
+    },
+    "/salud": {
+      "p50_ms": 4.6,
+      "filas": 0.0
+    }
+  },
+  "ms_por_prediccion": {
+    "/predicciones/p1 [lote]": 0.0546,
+    "/predicciones/p2": 1.21,
+    "/predicciones/p3 [lote]": 0.4406
+  },
+  "cpu_seg_por_prediccion": 0.0006541095890410959,
+  "memoria_api_max_mib": 508.9,
+  "memoria_api_limite_mib": 1024.0,
+  "memoria_sugerida_mib": 768,
+  "cpu_saturada": true,
+  "modelos_de_prueba": false
+}
