@@ -13,7 +13,7 @@ los modelos de P2 y P3, que se sirven en la misma API.
 |---|---|
 | Tarea | Regresion: viajes que saldran de cada estacion en cada hora del dia siguiente |
 | Algoritmo | `HistGradientBoostingRegressor` de scikit-learn con perdida Poisson (`hgb_poisson`) |
-| Hiperparametros | `config.P1_HIPERPARAMETROS`: learning_rate 0.08, max_iter 400, max_leaf_nodes 63, min_samples_leaf 100, l2_regularization 1.0, early stopping |
+| Hiperparametros | Los de la busqueda de la semana 6 (run `p1-busqueda-hgb_poisson-learning_rate0.05-max_leaf_nodes127`): learning_rate 0.05 y max_leaf_nodes 127; el resto como en `config.P1_HIPERPARAMETROS` (max_iter 400, min_samples_leaf 100, l2_regularization 1.0, early stopping) |
 | Baseline | `rezago_semanal`: las salidas de la misma hora hace 7 dias |
 | Version en produccion | Alias `@champion`, version 1 (run `166442af41ea432bbe181ccd17a571f9`) |
 | Version retadora | Alias `@challenger`, version 3, reentrenada hasta agosto de 2026 (Continuous Training) |
@@ -62,7 +62,7 @@ La prueba (jul a sep 2026) solo se usa para reportar.
 
 | Conjunto | hgb_poisson (champion) | Baseline `rezago_semanal` | Mejora |
 |---|---|---|---|
-| Validacion (abr a jun 2026) | 0.752 | 0.950 | -21 % |
+| Validacion (abr a jun 2026) | 0.750 | 0.950 | -21 % |
 | Prueba (jul a sep 2026) | 0.732 | 0.899 | -19 % |
 
 **Desempeno mensual del champion** (MAE, 2026): abr 0.756, may 0.706, jun 0.791, jul 0.720,
@@ -94,7 +94,8 @@ mejora es pequena (0.2 %). Detalle completo en `reports/monitoreo/ab_test.md`.
   uno normal.
 - Predice salidas esperadas (un promedio), no un intervalo: no dice que tan segura es cada
   prediccion.
-- La red crecio de unas 368 a 468 estaciones con viajes en 2026; mientras siga creciendo, el
+- La red crecio de unas 370 estaciones en la referencia (oct 2024 a mar 2026) a 469 en jul a sep
+  de 2026; mientras siga creciendo, el
   modelo vera estaciones que no conoce.
 
 ## 6. Riesgos y mitigacion
@@ -113,7 +114,10 @@ mejora es pequena (0.2 %). Detalle completo en `reports/monitoreo/ab_test.md`.
   Jensen-Shannon para categoricas, umbral 0.1, sobre 200 mil filas. Hace tres comparaciones para
   separar causas: principal, sin estaciones nuevas y misma temporada. Salidas en
   `reports/monitoreo/resumen_drift.md`.
-- **Hallazgo:** 99 de las 468 estaciones del periodo actual son nuevas. El MAE mensual no muestra
+- **Hallazgo:** 4 de 17 variables derivan en la comparacion principal: `mes` (temporada) y
+  `salidas_media_7d`, `longitud` y `salidas_media_24h_previa` (estaciones nuevas). Sin las
+  estaciones nuevas solo deriva `mes`, y en la misma temporada no deriva ninguna. 99 de las 469
+  estaciones de jul a sep de 2026 son nuevas (17.7 % de las filas). El MAE mensual no muestra
   degradacion sostenida, pero septiembre (0.797) es el peor mes, lo que motivo el reentrenamiento.
 - **Continuous Training:** `make retrain` reentrena el mismo modelo con datos hasta agosto de 2026
   y lo registra como `@challenger`; `make abtest` lo compara y, con `PROMOVER=si`, mueve el alias
@@ -121,13 +125,15 @@ mejora es pequena (0.2 %). Detalle completo en `reports/monitoreo/ab_test.md`.
 
 ## 8. Seguridad y operacion
 
-- CI en cada pull request: `pip-audit` de dependencias e imagen, `bandit` sobre el codigo y
+- CI en cada pull request: `pip-audit` de las dependencias del proyecto y de
+  `requirements-api.txt`, `bandit` sobre el codigo y
   revision de credenciales.
 - Contenedor sin root (usuario 10001), imagen base fijada por digest, puertos solo en 127.0.0.1.
 - `GET /salud` responde 503 si falta un modelo; `GET /modelo` expone version, run y linaje del
   modelo que esta sirviendo.
-- Capacidad medida con Locust: unas 95 peticiones por segundo con 1 vCPU y 193 con 2 vCPU y un
-  hilo por proceso, sin peticiones fallidas (`reports/carga/resumen_carga.md`).
+- Capacidad medida con Locust (corrida oficial con los champions): 46.5 peticiones por segundo
+  (961 predicciones por segundo) con 1 vCPU, con p95 de 281 ms y 0 errores en 11,970 peticiones
+  (`reports/carga/resumen_carga.md`).
 
 ## 9. Como reproducirlo
 
@@ -135,7 +141,7 @@ mejora es pequena (0.2 %). Detalle completo en `reports/monitoreo/ab_test.md`.
 mlflow run . -e ingest --env-manager local
 mlflow run . -e features --env-manager local
 mlflow run . -e train -P pregunta=p1 -P modelo=rezago_semanal --env-manager local
-mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson --env-manager local
+mlflow run . -e train -P pregunta=p1 -P modelo=hgb_poisson -P learning_rate=0.05 -P max_leaf_nodes=127 --env-manager local
 mlflow run . -e register -P pregunta=p1 --env-manager local
 ```
 
@@ -146,8 +152,8 @@ El comando exacto de cada version esta en su etiqueta `comando_reproduccion` del
 
 | Pregunta | Modelo registrado | Champion | Metrica de seleccion | Champion | Baseline |
 |---|---|---|---|---|---|
-| P2 - Riesgo de vaciado o llenado en bloques de 3 h (clasificacion) | `mibici-equipo18-p2-riesgo` | `hgb_ponderado` (gradient boosting con peso de las clases de riesgo buscado) | F1 macro de validacion | 0.607 | 0.537 (`frecuencia_mismo_bloque`) |
-| P3 - Grupos de estaciones por perfil de uso (clustering) | `mibici-equipo18-p3-grupos` | `jerarquico_pca` (Ward, 3 grupos, sobre PCA al 90 % de varianza) | Silhouette de entrenamiento y estabilidad (ARI) | 0.135, ARI 0.662 | -0.052 (`cuartiles_volumen`) |
+| P2 - Riesgo de vaciado o llenado en bloques de 3 h (clasificacion) | `mibici-equipo18-p2-riesgo` | `hgb_ponderado` (gradient boosting con peso de las clases de riesgo buscado) | F1 macro de validacion | 0.633 | 0.537 (`frecuencia_mismo_bloque`) |
+| P3 - Grupos de estaciones por perfil de uso (clustering) | `mibici-equipo18-p3-grupos` | `jerarquico_pca` (Ward, 3 grupos, sobre PCA al 90 % de varianza) | Silhouette (entrenamiento) y estabilidad ARI (validacion y prueba) | Silhouette 0.135; ARI 0.794 en validacion y 0.662 en prueba | Silhouette -0.052 (`cuartiles_volumen`) |
 
 Limitaciones principales: en P2 las clases de riesgo son raras (cerca de 1.5 % de los bloques
 cada una), asi que habra alertas falsas; en P3 la estructura de grupos es debil (silhouette

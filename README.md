@@ -616,6 +616,76 @@ prediccion. La API no calcula las variables; quien la llama envia las variables 
 En los tres casos el mismo contenedor sirve para ambos modos: un proceso programado llama al
 endpoint con un lote (P1 y P3) y una aplicacion o tablero lo llama bajo demanda (P2).
 
+## Monitoreo, Continuous Training y A/B testing (semana 9)
+
+Se monitorea P1 (demanda por estacion y hora), el modelo que alimenta la planeacion diaria. El
+ciclo completo tiene tres pasos, cada uno con un comando:
+
+```bash
+make venv-monitoreo   # una vez: ambiente de Evidently (Python 3.13), aparte del proyecto
+make drift            # 1. reporte de drift con Evidently (necesita data/processed)
+make retrain          # 2. reentrena el champion con datos recientes y lo registra como challenger
+make abtest           # 3. A/B entre champion y challenger; make abtest PROMOVER=si mueve el alias
+```
+
+### Reporte de drift con Evidently
+
+`monitoreo/drift.py` compara las variables de P1 de dos periodos (fechas en `config.MONITOREO_*`):
+
+| Periodo | Fechas | Que representa |
+|---|---|---|
+| Referencia | oct 2024 a mar 2026 | Los datos con que se entreno el champion |
+| Actual | jul a sep 2026 | Produccion: el champion nunca vio estos meses |
+
+- Metodos: distancia de Wasserstein normalizada (numericas) y de Jensen-Shannon (categoricas).
+  Una variable deriva si su distancia es de 0.1 o mas; se usa una muestra de 200 mil filas.
+- Tres comparaciones para separar causas: `principal` (actual contra referencia),
+  `sin_nuevas` (solo estaciones que ya existian) y `misma_temporada` (jul a sep 2025 contra jul a
+  sep 2026). Lo que deriva en `principal` y no en `sin_nuevas` lo explican las estaciones nuevas.
+- Ademas calcula el MAE mensual del champion de abr a sep 2026 para ver si el desempeno se degrada.
+
+Hallazgos: 4 de 17 variables derivan en la comparacion principal: `mes` (temporada) y
+`salidas_media_7d`, `longitud` y `salidas_media_24h_previa` (estaciones nuevas). Sin las
+estaciones nuevas solo deriva `mes`, y en la misma temporada no deriva ninguna: el cambio lo
+explican la temporada y el crecimiento de la red (99 de las 469 estaciones de jul a sep de 2026
+son nuevas). El MAE mensual no muestra degradacion sostenida, pero septiembre (0.797) es el peor
+mes, lo que motiva reentrenar con los meses recientes. Detalle por variable en `reports/monitoreo/resumen_drift.md`.
+
+| Salida | En Git |
+|---|---|
+| `reports/monitoreo/resumen_drift.md` y `drift_puntajes.csv` | Si |
+| `reports/figures/monitoreo/*.png` | Si |
+| `reports/monitoreo/drift_<comparacion>.html` (reporte interactivo de Evidently) | No (pesa varios MB, se regenera) |
+
+### Continuous Training
+
+`make retrain` (entry point `retrain`, `modeling/reentrenar.py`) entrena el mismo modelo con los
+mismos hiperparametros que el champion, pero con datos hasta `config.REENTRENAMIENTO_FIN`
+(agosto de 2026), y lo registra con el alias `@challenger`. Asi el A/B mide solo el efecto de
+entrenar con datos recientes.
+
+### A/B testing
+
+`make abtest` (entry point `abtest`, `modeling/ab_test.py`) evalua A (`@champion`) y B
+(`@challenger`) sobre el mismo conjunto: septiembre de 2026, posterior al entrenamiento de las
+dos versiones. La regla de decision se fijo en `config.AB_*` antes de ver los resultados:
+
+1. B es mejor si el intervalo de confianza al 95 % de MAE(A) - MAE(B), con bootstrap pareado por
+   dia (10,000 remuestreos), queda completo por encima de 0. Se remuestrea por dia porque las
+   horas de un mismo dia no son independientes.
+2. Sin regresion: en las estaciones conocidas, el MAE de B no puede ser mas de 1 % peor.
+3. Ninguna version puede haber entrenado con el mes de evaluacion (se verifica antes de evaluar).
+
+| Version | Entrenada hasta | MAE en septiembre de 2026 |
+|---|---|---|
+| A, `@champion` (v1) | marzo de 2026 | 0.7969 |
+| B, `@challenger` (v3) | agosto de 2026 | 0.7951 |
+
+MAE(A) - MAE(B) = +0.0018 con IC 95 % de [+0.0010, +0.0026]: la regla indica promover B, aunque
+la mejora es pequena (0.2 %). Con `make abtest PROMOVER=si` el alias `@champion` pasa a B; despues
+hay que volver a exportar el modelo (`make export-model`) y reconstruir la imagen. Salidas:
+`reports/monitoreo/ab_test.md`, `ab_test.json` y dos figuras, todas en Git.
+
 ## Operacion con Docker Compose (semana 10)
 
 El proyecto se levanta como un sistema de servicios con **un solo comando**. `docker-compose.yml`
@@ -794,73 +864,6 @@ prueba de carga. Salidas: `reports/carga/finops.json` (costos por opcion, demand
 ms y CPU por prediccion, memoria sugerida) y `reports/figures/carga/costo_mensual.png`, ambas en
 Git.
 
-## Monitoreo, Continuous Training y A/B testing (semana 9)
-
-Se monitorea P1 (demanda por estacion y hora), el modelo que alimenta la planeacion diaria. El
-ciclo completo tiene tres pasos, cada uno con un comando:
-
-```bash
-make venv-monitoreo   # una vez: ambiente de Evidently (Python 3.13), aparte del proyecto
-make drift            # 1. reporte de drift con Evidently (necesita data/processed)
-make retrain          # 2. reentrena el champion con datos recientes y lo registra como challenger
-make abtest           # 3. A/B entre champion y challenger; make abtest PROMOVER=si mueve el alias
-```
-
-### Reporte de drift con Evidently
-
-`monitoreo/drift.py` compara las variables de P1 de dos periodos (fechas en `config.MONITOREO_*`):
-
-| Periodo | Fechas | Que representa |
-|---|---|---|
-| Referencia | oct 2024 a mar 2026 | Los datos con que se entreno el champion |
-| Actual | jul a sep 2026 | Produccion: el champion nunca vio estos meses |
-
-- Metodos: distancia de Wasserstein normalizada (numericas) y de Jensen-Shannon (categoricas).
-  Una variable deriva si su distancia es de 0.1 o mas; se usa una muestra de 200 mil filas.
-- Tres comparaciones para separar causas: `principal` (actual contra referencia),
-  `sin_nuevas` (solo estaciones que ya existian) y `misma_temporada` (jul a sep 2025 contra jul a
-  sep 2026). Lo que deriva en `principal` y no en `sin_nuevas` lo explican las estaciones nuevas.
-- Ademas calcula el MAE mensual del champion de abr a sep 2026 para ver si el desempeno se degrada.
-
-Hallazgos: la red crecio (99 de las 468 estaciones del periodo actual son nuevas). El MAE
-mensual no muestra degradacion sostenida, pero septiembre (0.797) es el peor mes, lo que motiva
-reentrenar con los meses recientes. Detalle por variable en `reports/monitoreo/resumen_drift.md`.
-
-| Salida | En Git |
-|---|---|
-| `reports/monitoreo/resumen_drift.md` y `drift_puntajes.csv` | Si |
-| `reports/figures/monitoreo/*.png` | Si |
-| `reports/monitoreo/drift_<comparacion>.html` (reporte interactivo de Evidently) | No (pesa varios MB, se regenera) |
-
-### Continuous Training
-
-`make retrain` (entry point `retrain`, `modeling/reentrenar.py`) entrena el mismo modelo con los
-mismos hiperparametros que el champion, pero con datos hasta `config.REENTRENAMIENTO_FIN`
-(agosto de 2026), y lo registra con el alias `@challenger`. Asi el A/B mide solo el efecto de
-entrenar con datos recientes.
-
-### A/B testing
-
-`make abtest` (entry point `abtest`, `modeling/ab_test.py`) evalua A (`@champion`) y B
-(`@challenger`) sobre el mismo conjunto: septiembre de 2026, posterior al entrenamiento de las
-dos versiones. La regla de decision se fijo en `config.AB_*` antes de ver los resultados:
-
-1. B es mejor si el intervalo de confianza al 95 % de MAE(A) - MAE(B), con bootstrap pareado por
-   dia (10,000 remuestreos), queda completo por encima de 0. Se remuestrea por dia porque las
-   horas de un mismo dia no son independientes.
-2. Sin regresion: en las estaciones conocidas, el MAE de B no puede ser mas de 1 % peor.
-3. Ninguna version puede haber entrenado con el mes de evaluacion (se verifica antes de evaluar).
-
-| Version | Entrenada hasta | MAE en septiembre de 2026 |
-|---|---|---|
-| A, `@champion` (v1) | marzo de 2026 | 0.7969 |
-| B, `@challenger` (v3) | agosto de 2026 | 0.7951 |
-
-MAE(A) - MAE(B) = +0.0018 con IC 95 % de [+0.0010, +0.0026]: la regla indica promover B, aunque
-la mejora es pequena (0.2 %). Con `make abtest PROMOVER=si` el alias `@champion` pasa a B; despues
-hay que volver a exportar el modelo (`make export-model`) y reconstruir la imagen. Salidas:
-`reports/monitoreo/ab_test.md`, `ab_test.json` y dos figuras, todas en Git.
-
 ## Model Card
 
 El [Model Card](MODEL_CARD.md) documenta el modelo de demanda (P1): uso previsto y fuera de
@@ -1020,8 +1023,8 @@ make run-api CONTAINER=docker
 - [Propuesta de solucion, entrega 1](reports/propuesta_entrega1.md)
 - [ML Canvas](references/ml_canvas.md) - [Arquitectura](references/arquitectura.md)
 - [Despliegue de la API](#despliegue-de-la-api-semana-8) - Swagger en `/docs` con la API corriendo
+- [Monitoreo, Continuous Training y A/B testing](#monitoreo-continuous-training-y-ab-testing-semana-9)
 - [Operacion con Docker Compose](#operacion-con-docker-compose-semana-10)
 - [Prueba de carga](#prueba-de-carga-y-uso-de-recursos-semana-10) - [Analisis FinOps](#analisis-finops)
-- [Monitoreo, Continuous Training y A/B testing](#monitoreo-continuous-training-y-ab-testing-semana-9)
 - [Model Card](MODEL_CARD.md)
 - [Resumen de los datos](reports/resumen_datos.md) - [Manifiesto de datos](references/manifiesto_datos.json)
