@@ -1,0 +1,147 @@
+{
+  "modelo_registrado": "mibici-equipo18-p1-demanda",
+  "data_version": "06b0010a4627",
+  "evaluacion": [
+    "2026-09-01",
+    "2026-09-30"
+  ],
+  "referencia": [
+    "2024-10-01",
+    "2026-03-31"
+  ],
+  "versiones": {
+    "A": {
+      "alias": "champion",
+      "version": "1",
+      "run_id": "166442af41ea432bbe181ccd17a571f9",
+      "fin_entrenamiento": "2026-03-31",
+      "version_origen": null,
+      "data_version": "06b0010a4627"
+    },
+    "B": {
+      "alias": "challenger",
+      "version": "3",
+      "run_id": "cc9d2e9a7e79461a9cd1ce35f7fba836",
+      "fin_entrenamiento": "2026-08-31",
+      "version_origen": "1",
+      "data_version": "06b0010a4627"
+    }
+  },
+  "metricas": [
+    {
+      "grupo": "todas",
+      "version": "A",
+      "filas": 336912,
+      "estaciones": 468,
+      "mae": 0.7968936319825214,
+      "rmse": 1.5063942998713264,
+      "wape": 0.5708481773982885,
+      "devianza_poisson": 0.9621963455712675
+    },
+    {
+      "grupo": "todas",
+      "version": "B",
+      "filas": 336912,
+      "estaciones": 468,
+      "mae": 0.7950911477362053,
+      "rmse": 1.4959372824118748,
+      "wape": 0.5695569826823277,
+      "devianza_poisson": 0.9558457502041068
+    },
+    {
+      "grupo": "conocidas",
+      "version": "A",
+      "filas": 265680,
+      "estaciones": 369,
+      "mae": 0.8824933169188265,
+      "rmse": 1.6400358749829496,
+      "wape": 0.5421849296868534,
+      "devianza_poisson": 1.010257723346423
+    },
+    {
+      "grupo": "conocidas",
+      "version": "B",
+      "filas": 265680,
+      "estaciones": 369,
+      "mae": 0.8807648174756055,
+      "rmse": 1.6280628810377897,
+      "wape": 0.5411229767733078,
+      "devianza_poisson": 1.003053914619952
+    },
+    {
+      "grupo": "nuevas",
+      "version": "A",
+      "filas": 71232,
+      "estaciones": 99,
+      "mae": 0.4776252653231899,
+      "rmse": 0.8371811451908167,
+      "wape": 0.8980151744576219,
+      "devianza_poisson": 0.7829377701093511
+    },
+    {
+      "grupo": "nuevas",
+      "version": "B",
+      "filas": 71232,
+      "estaciones": 99,
+      "mae": 0.47554683371492457,
+      "rmse": 0.8356560876299219,
+      "wape": 0.8941073763179408,
+      "devianza_poisson": 0.7797694765910982
+    }
+  ],
+  "bootstrap": {
+    "diferencia_mae": 0.0018024842463163083,
+    "ic_inferior": 0.0010006320085164358,
+    "ic_superior": 0.0026093384597164,
+    "fraccion_b_mejor": 1.0,
+    "dias": 30,
+    "remuestreos": 10000,
+    "confianza": 0.95
+  },
+  "decision": {
+    "b_mejor_en_mae": true,
+    "cambio_mae_conocidas": -0.001958654428405038,
+    "sin_regresion_en_conocidas": true,
+    "promover_b": true,
+    "motivo": "B gana: el intervalo de MAE(A) - MAE(B) queda arriba de 0 y no empeora en las conocidas."
+  },
+  "aliases": "sin cambios; para promover a B: make abtest PROMOVER=si",
+  "mae_mensual_champion": [
+    {
+      "mes": "2026-04",
+      "mae": 0.755567147995093,
+      "filas": 266400,
+      "particion": "validacion"
+    },
+    {
+      "mes": "2026-05",
+      "mae": 0.7054725544261196,
+      "filas": 275280,
+      "particion": "validacion"
+    },
+    {
+      "mes": "2026-06",
+      "mae": 0.7904837534059975,
+      "filas": 275472,
+      "particion": "validacion"
+    },
+    {
+      "mes": "2026-07",
+      "mae": 0.7199552511605608,
+      "filas": 316224,
+      "particion": "prueba"
+    },
+    {
+      "mes": "2026-08",
+      "mae": 0.6782413766913722,
+      "filas": 338496,
+      "particion": "prueba"
+    },
+    {
+      "mes": "2026-09",
+      "mae": 0.7968936319825216,
+      "filas": 336912,
+      "particion": "prueba"
+    }
+  ]
+}
